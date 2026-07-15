@@ -14,3 +14,5 @@ static/
 test
 scripts
 AGENTS.md
+# local docker deployment data (passwords/cookies)
+/deploy/data/

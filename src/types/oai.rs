@@ -43,10 +43,28 @@ fn normalize_message(msg: Message) -> Option<Message> {
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum Effort {
-    Low = 256,
+    Low,
     #[default]
-    Medium = 256 * 8,
-    High = 256 * 8 * 8,
+    Medium,
+    High,
+    #[serde(rename = "xhigh", alias = "x_high")]
+    XHigh,
+    /// Forward-compatible passthrough for unknown effort levels
+    #[serde(untagged)]
+    Other(String),
+}
+
+impl Effort {
+    /// Approximate thinking budget (tokens) for this effort level
+    pub fn budget_tokens(&self) -> u64 {
+        match self {
+            Effort::Low => 256,
+            Effort::Medium => 256 * 8,
+            Effort::High => 256 * 8 * 8,
+            Effort::XHigh => 256 * 8 * 8 * 2,
+            Effort::Other(_) => 256 * 8,
+        }
+    }
 }
 
 impl From<CreateMessageParams> for ClaudeCreateMessageParams {
@@ -80,7 +98,7 @@ impl From<CreateMessageParams> for ClaudeCreateMessageParams {
             stop_sequences: params.stop,
             thinking: params
                 .thinking
-                .or_else(|| params.reasoning_effort.map(|e| Thinking::new(e as u64))),
+                .or_else(|| params.reasoning_effort.map(|e| Thinking::new(e.budget_tokens()))),
             temperature: params.temperature,
             stream: params.stream,
             top_k: params.top_k,

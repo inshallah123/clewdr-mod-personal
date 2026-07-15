@@ -25,7 +25,8 @@
   "tabs": {
     "claude": "Claude",
     "config": "Config",
-    "auth": "Auth"
+    "auth": "Auth",
+    "stats": "Stats"
   },
   "claudeTab": {
     "submit": "Submit Cookie",
@@ -81,16 +82,6 @@
         "rateLimited": "Rate limited until",
         "unknown": "Unknown"
       }
-    },
-    "usage": {
-      "currentInput": "Current input tokens",
-      "currentOutput": "Current output tokens",
-      "totalInput": "Total input tokens",
-      "totalOutput": "Total output tokens",
-      "sonnetInput": "Sonnet input tokens",
-      "sonnetOutput": "Sonnet output tokens",
-      "opusInput": "Opus input tokens",
-      "opusOutput": "Opus output tokens"
     },
     "quota": {
       "session": "Session utilization",
@@ -173,5 +164,32 @@
     "reveal": "Reveal",
     "hide": "Hide",
     "copy": "Copy to clipboard"
+  },
+  "usage": {
+    "title": "Usage & Cost",
+    "statsTitle": "Usage Statistics",
+    "model": "Model",
+    "requests": "Requests",
+    "input": "Input",
+    "output": "Output",
+    "cacheRead": "Cache Read",
+    "cacheWrite": "Cache Write",
+    "cost": "Cost",
+    "total": "Total",
+    "time": "Time",
+    "today": "Today",
+    "last7d": "Last 7 days",
+    "last30d": "Last 30 days",
+    "allTime": "All time",
+    "metricCost": "Cost",
+    "metricTokens": "Tokens",
+    "bucketDay": "Daily",
+    "bucketHour": "Hourly",
+    "d7": "7d",
+    "d30": "30d",
+    "d90": "90d",
+    "allCookies": "All cookies",
+    "empty": "No data yet",
+    "estimatedNote": "≈ includes estimates (web path reports no exact token counts)"
   }
 }

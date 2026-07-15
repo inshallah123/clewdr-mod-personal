@@ -76,6 +76,10 @@ pub struct ClewdrConfig {
     #[serde(default)]
     pub log_to_file: bool,
 
+    /// Manual pricing overrides (highest priority in cost calculation)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub price_overrides: Vec<crate::services::pricing::PriceOverride>,
+
     // Network settings, can hot reload
     #[serde(default)]
     password: String,
@@ -171,6 +175,7 @@ impl Default for ClewdrConfig {
             custom_system: None,
             no_fs: false,
             log_to_file: false,
+            price_overrides: Vec::new(),
         }
     }
 }

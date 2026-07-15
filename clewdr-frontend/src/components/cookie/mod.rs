@@ -1,8 +1,10 @@
 mod row;
 mod usage;
+mod usage_modal;
 
 use leptos::{ev, prelude::*};
 use row::{ExhaustedRow, InvalidRow, ValidRow};
+use usage_modal::UsageModal;
 use wasm_bindgen_futures::spawn_local;
 
 use crate::{api, i18n::use_i18n, types::CookieStatusInfo};
@@ -17,6 +19,10 @@ pub fn CookieVisualization() -> impl IntoView {
     let refresh_trigger = RwSignal::new(0u32);
 
     provide_context(refresh_trigger);
+
+    // cookie string -> show usage modal
+    let usage_modal_for = RwSignal::new(Option::<String>::None);
+    provide_context(usage_modal_for);
 
     let fetch = move |force: bool| {
         loading.set(true);
@@ -49,6 +55,12 @@ pub fn CookieVisualization() -> impl IntoView {
 
     view! {
         <div class="stack">
+            {move || usage_modal_for.get().map(|cookie| view! {
+                <UsageModal
+                    cookie=cookie
+                    on_close=Callback::new(move |_| usage_modal_for.set(None))
+                />
+            })}
             <div class="row-btw">
                 <div>
                     <h3>{move || i18n.t("cookieStatus.title")}</h3>

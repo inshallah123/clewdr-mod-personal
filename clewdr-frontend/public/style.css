@@ -320,3 +320,108 @@ details[open] { margin-top: 0.2rem; }
     .header, .footer { display: none; }
     .card { border: 0; box-shadow: none; }
 }
+
+/* Plan tier badge on cookie cards */
+.plan-badge {
+    display: inline-block;
+    padding: 0.05rem 0.45rem;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    line-height: 1.4;
+    color: var(--accent);
+    background: var(--accent-dim);
+    border: 1px solid var(--accent);
+    white-space: nowrap;
+}
+
+/* ---------- Usage & cost statistics ---------- */
+
+/* modal */
+.modal-backdrop {
+    position: fixed; inset: 0; z-index: 100;
+    background: rgba(0,0,0,0.45);
+    display: flex; align-items: center; justify-content: center;
+    padding: 1rem;
+}
+.modal {
+    background: var(--card, var(--bg, #fff));
+    border: 1px solid var(--border, #d8dbe4);
+    border-radius: 12px;
+    box-shadow: 0 18px 50px rgba(0,0,0,0.25);
+    padding: 1.1rem 1.25rem;
+    width: min(760px, 96vw);
+    max-height: 85vh;
+    overflow: auto;
+}
+
+/* tables */
+.usage-table-wrap { overflow-x: auto; }
+.usage-table {
+    width: 100%; border-collapse: collapse; font-size: 0.82rem;
+    white-space: nowrap;
+}
+.usage-table th, .usage-table td {
+    padding: 0.4rem 0.6rem;
+    text-align: right;
+    border-bottom: 1px solid var(--border, #e3e6ee);
+}
+.usage-table th:first-child, .usage-table td:first-child { text-align: left; }
+.usage-table thead th {
+    font-weight: 600; color: var(--text-dim);
+    font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em;
+}
+.usage-table tfoot td {
+    font-weight: 700; border-bottom: none;
+    border-top: 2px solid var(--border, #d8dbe4);
+}
+.usage-cost { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--accent); }
+
+/* summary cards */
+.stat-cards {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 0.75rem;
+}
+.stat-card {
+    border: 1px solid var(--border, #e3e6ee);
+    border-radius: 10px;
+    padding: 0.75rem 0.9rem;
+    background: var(--accent-dim);
+}
+.stat-card-label { font-size: 0.72rem; color: var(--text-dim); letter-spacing: 0.03em; }
+.stat-card-value { font-size: 1.45rem; font-weight: 700; color: var(--accent); margin-top: 0.15rem; font-variant-numeric: tabular-nums; }
+.stat-card-sub { font-size: 0.72rem; color: var(--text-dim); margin-top: 0.15rem; }
+
+/* toggle groups */
+.toggle-group {
+    display: inline-flex; border: 1px solid var(--border, #d8dbe4);
+    border-radius: 8px; overflow: hidden;
+}
+.toggle-btn {
+    border: none; background: transparent; cursor: pointer;
+    padding: 0.28rem 0.7rem; font-size: 0.78rem; color: var(--text-dim);
+}
+.toggle-btn + .toggle-btn { border-left: 1px solid var(--border, #d8dbe4); }
+.toggle-btn.active { background: var(--accent); color: #fff; }
+
+.stats-select {
+    padding: 0.3rem 0.5rem; font-size: 0.8rem;
+    border: 1px solid var(--border, #d8dbe4); border-radius: 8px;
+    background: var(--card, transparent); color: inherit;
+    max-width: 220px;
+}
+.stats-controls { flex-wrap: wrap; gap: 0.5rem; }
+
+/* chart */
+.chart-wrap { width: 100%; }
+.usage-chart { width: 100%; height: 260px; display: block; }
+.chart-grid { stroke: var(--border, #e3e6ee); stroke-width: 1; }
+.chart-axis { fill: var(--text-dim); font-size: 10px; }
+.chart-bar rect { transition: opacity 0.1s; }
+.chart-bar:hover rect { opacity: 0.82; }
+.chart-legend {
+    display: flex; flex-wrap: wrap; gap: 0.4rem 1rem;
+    margin-top: 0.5rem; font-size: 0.75rem; color: var(--text-dim);
+}
+.legend-item { display: inline-flex; align-items: center; gap: 0.35rem; }
+.legend-dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }

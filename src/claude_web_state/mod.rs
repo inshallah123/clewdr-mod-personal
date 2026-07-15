@@ -190,6 +190,13 @@ impl ClaudeWebState {
             return None;
         }
 
+        // Persist account email / plan tier discovered during bootstrap
+        if state.cookie.as_ref().is_some_and(|c| {
+            c.account_email != cookie.account_email || c.rate_limit_tier != cookie.rate_limit_tier
+        }) {
+            state.return_cookie(None).await;
+        }
+
         let org_uuid = state.org_uuid.as_ref()?;
         let url = state
             .endpoint

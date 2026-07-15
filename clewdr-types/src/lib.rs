@@ -1,11 +1,16 @@
 mod config;
 mod reason;
 mod usage;
+mod usage_stats;
 
 pub use config::ConfigApi;
 pub use reason::Reason;
 use serde::{Deserialize, Serialize};
 pub use usage::UsageBreakdown;
+pub use usage_stats::{
+    CookieUsageSummary, ModelPricing, ModelUsageRow, SeriesBucketApi, TokenUsage, UsageSeriesApi,
+    UsageSummaryApi,
+};
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct CookieStatusApi {
@@ -16,6 +21,10 @@ pub struct CookieStatusApi {
     pub fable_reset_time: Option<i64>,
     #[serde(default)]
     pub count_tokens_allowed: Option<bool>,
+    #[serde(default)]
+    pub account_email: Option<String>,
+    #[serde(default)]
+    pub rate_limit_tier: Option<String>,
     #[serde(default)]
     pub session_usage: UsageBreakdown,
     #[serde(default)]

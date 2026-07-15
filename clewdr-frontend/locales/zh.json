@@ -25,7 +25,8 @@
   "tabs": {
     "claude": "Claude",
     "config": "配置",
-    "auth": "认证"
+    "auth": "认证",
+    "stats": "统计"
   },
   "claudeTab": {
     "submit": "提交Cookie",
@@ -81,16 +82,6 @@
         "rateLimited": "限速至",
         "unknown": "未知"
       }
-    },
-    "usage": {
-      "currentInput": "本轮输入 Token",
-      "currentOutput": "本轮输出 Token",
-      "totalInput": "累计输入 Token",
-      "totalOutput": "累计输出 Token",
-      "sonnetInput": "Sonnet 输入 Token",
-      "sonnetOutput": "Sonnet 输出 Token",
-      "opusInput": "Opus 输入 Token",
-      "opusOutput": "Opus 输出 Token"
     },
     "quota": {
       "session": "会话配额使用",
@@ -173,5 +164,32 @@
     "reveal": "显示",
     "hide": "隐藏",
     "copy": "复制到剪贴板"
+  },
+  "usage": {
+    "title": "用量与成本",
+    "statsTitle": "用量统计",
+    "model": "模型",
+    "requests": "请求",
+    "input": "输入",
+    "output": "输出",
+    "cacheRead": "缓存读",
+    "cacheWrite": "缓存写",
+    "cost": "成本",
+    "total": "合计",
+    "time": "时间",
+    "today": "今日",
+    "last7d": "近 7 天",
+    "last30d": "近 30 天",
+    "allTime": "累计",
+    "metricCost": "成本",
+    "metricTokens": "Tokens",
+    "bucketDay": "按天",
+    "bucketHour": "按小时",
+    "d7": "7天",
+    "d30": "30天",
+    "d90": "90天",
+    "allCookies": "全部 Cookie",
+    "empty": "暂无数据",
+    "estimatedNote": "≈ 含估算值（网页端不返回精确 token 数）"
   }
 }

@@ -125,7 +125,7 @@ impl ClaudeWebState {
                         ).await.map(|v| v as u64);
                     }
                     let out = out.unwrap_or_else(|| {
-                        let usage = crate::types::claude::Usage { input_tokens: input_tokens as u32, output_tokens: 0 };
+                        let usage = crate::types::claude::Usage { input_tokens: input_tokens as u32, output_tokens: 0, ..Default::default() };
                         let resp = crate::types::claude::CreateMessageResponse::text(acc.clone(), Default::default(), usage);
                         resp.count_tokens() as u64
                     });
@@ -135,6 +135,7 @@ impl ClaudeWebState {
                             .map(|p| p.model.as_str())
                             .map(crate::config::ModelFamily::classify)
                             .unwrap_or(crate::config::ModelFamily::Other);
+                        record_web_usage(&c, last_params.as_deref_model(), input_tokens, out);
                         c.add_and_bucket_usage(input_tokens, out, family);
                         let _ = handle.return_cookie(c, None).await;
                     }
@@ -145,6 +146,7 @@ impl ClaudeWebState {
                         .map(|p| p.model.as_str())
                         .map(crate::config::ModelFamily::classify)
                         .unwrap_or(crate::config::ModelFamily::Other);
+                    record_web_usage(&c, last_params.as_deref_model(), input_tokens, 0);
                     c.add_and_bucket_usage(input_tokens, 0, family);
                     let _ = handle.return_cookie(c, None).await;
                 }
@@ -187,9 +189,49 @@ impl ClaudeWebState {
         }
         usage.output_tokens = output_tokens;
         response.usage = Some(usage.clone());
+        if let Some(c) = self.cookie.as_ref() {
+            record_web_usage(
+                c,
+                self.last_params.as_ref().map(|p| p.model.clone()),
+                usage.input_tokens as u64,
+                output_tokens as u64,
+            );
+        }
         self.persist_usage_totals(usage.input_tokens as u64, output_tokens as u64)
             .await;
         Ok(Json(response).into_response())
+    }
+}
+
+/// Record web-path usage into the statistics tracker. The claude.ai protocol
+/// does not report token usage, so counts are estimates and cache is unknown.
+fn record_web_usage(
+    cookie: &crate::config::CookieStatus,
+    model: Option<String>,
+    input: u64,
+    output: u64,
+) {
+    let key: &str = &cookie.cookie;
+    crate::services::usage_tracker::usage_tracker().record(
+        crate::services::usage_tracker::UsageRecord {
+            cookie: key.to_string(),
+            model: model.unwrap_or_else(|| "claude-web".to_string()),
+            input,
+            output,
+            cache_read: 0,
+            cache_write: 0,
+            estimated: true,
+        },
+    );
+}
+
+trait DerefModel {
+    fn as_deref_model(&self) -> Option<String>;
+}
+
+impl DerefModel for Option<crate::types::claude::CreateMessageParams> {
+    fn as_deref_model(&self) -> Option<String> {
+        self.as_ref().map(|p| p.model.clone())
     }
 }
 

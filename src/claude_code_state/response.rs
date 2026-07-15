@@ -12,7 +12,10 @@ use tracing::warn;
 use crate::{
     config::{CookieStatus, ModelFamily, UsageBreakdown},
     error::{ClewdrError, WreqSnafu},
-    services::cookie_actor::CookieActorHandle,
+    services::{
+        cookie_actor::CookieActorHandle,
+        usage_tracker::{UsageRecord, usage_tracker},
+    },
     types::claude::{CreateMessageResponse, StreamEvent},
 };
 
@@ -21,21 +24,70 @@ use super::{
     fable_fallback::{FALLBACK_NOTICE, prepend_notice_to_response, shift_content_block_index},
 };
 
+/// Full usage extracted from an Anthropic messages response.
+#[derive(Debug, Clone, Default)]
+pub(super) struct ExtractedUsage {
+    pub input: u64,
+    pub output: u64,
+    pub cache_read: u64,
+    pub cache_write: u64,
+    pub model: Option<String>,
+}
+
 impl ClaudeCodeState {
+    fn cookie_key(&self) -> Option<String> {
+        self.cookie.as_ref().map(|c| {
+            let s: &str = &c.cookie;
+            s.to_string()
+        })
+    }
+
     pub(super) async fn handle_success_response(
         &mut self,
         response: wreq::Response,
         model_family: ModelFamily,
         show_fallback_notice: bool,
+        requested_model: String,
     ) -> Result<axum::response::Response, ClewdrError> {
         if self.stream {
             return self
-                .forward_stream_with_usage(response, model_family, show_fallback_notice)
+                .forward_stream_with_usage(
+                    response,
+                    model_family,
+                    show_fallback_notice,
+                    requested_model,
+                )
                 .await;
         }
         let (response, usage) =
             Self::materialize_non_stream_response(response, show_fallback_notice).await?;
-        let (input, output) = usage.unwrap_or((self.usage.input_tokens as u64, 0));
+        let (input, output) = usage
+            .as_ref()
+            .map(|u| (u.input, u.output))
+            .unwrap_or((self.usage.input_tokens as u64, 0));
+        // Record detailed usage for cost statistics
+        if let Some(cookie_key) = self.cookie_key() {
+            let (u, estimated) = match usage {
+                Some(u) => (u, false),
+                None => (
+                    ExtractedUsage {
+                        input,
+                        output,
+                        ..Default::default()
+                    },
+                    true,
+                ),
+            };
+            usage_tracker().record(UsageRecord {
+                cookie: cookie_key,
+                model: u.model.unwrap_or(requested_model),
+                input: u.input,
+                output: u.output,
+                cache_read: u.cache_read,
+                cache_write: u.cache_write,
+                estimated,
+            });
+        }
         self.persist_usage_totals(input, output, model_family).await;
         Ok(response)
     }
@@ -62,15 +114,22 @@ impl ClaudeCodeState {
         response: wreq::Response,
         family: ModelFamily,
         show_fallback_notice: bool,
+        requested_model: String,
     ) -> Result<axum::response::Response, ClewdrError> {
-        let input_tokens = self.usage.input_tokens as u64;
+        let input_estimate = self.usage.input_tokens as u64;
         let output_sum = Arc::new(AtomicU64::new(0));
         let handle = self.cookie_actor_handle.clone();
         let cookie = self.cookie.clone();
+        let cookie_key = self.cookie_key();
         let osum = output_sum.clone();
         let mut upstream = response.bytes_stream().eventsource();
         let stream = async_stream::stream! {
             let mut notice_injected = false;
+            // Real usage from message_start (input/cache) and message_delta (output)
+            let mut seen_model: Option<String> = None;
+            let mut real_input: Option<u64> = None;
+            let mut cache_read: u64 = 0;
+            let mut cache_write: u64 = 0;
             while let Some(result) = upstream.next().await {
                 let event = match result {
                     Ok(event) => event,
@@ -81,12 +140,33 @@ impl ClaudeCodeState {
                 };
                 if let Ok(parsed) = serde_json::from_str::<StreamEvent>(&event.data) {
                     match parsed {
+                        StreamEvent::MessageStart { message } => {
+                            seen_model = Some(message.model);
+                            if let Some(u) = message.usage {
+                                real_input = Some(u.input_tokens as u64);
+                                cache_read = u.cache_read_input_tokens as u64;
+                                cache_write = u.cache_creation_input_tokens as u64;
+                            }
+                        }
                         StreamEvent::MessageDelta { usage: Some(usage), .. } => {
                             osum.fetch_add(usage.output_tokens as u64, Ordering::Relaxed);
                         }
                         StreamEvent::MessageStop => {
+                            let total_out = osum.load(Ordering::Relaxed);
+                            let input_tokens = real_input.unwrap_or(input_estimate);
+                            // Record detailed usage for cost statistics
+                            if let Some(key) = cookie_key.clone() {
+                                usage_tracker().record(UsageRecord {
+                                    cookie: key,
+                                    model: seen_model.clone().unwrap_or_else(|| requested_model.clone()),
+                                    input: input_tokens,
+                                    output: total_out,
+                                    cache_read,
+                                    cache_write,
+                                    estimated: real_input.is_none(),
+                                });
+                            }
                             if let (Some(cookie), handle) = (cookie.clone(), handle.clone()) {
-                                let total_out = osum.load(Ordering::Relaxed);
                                 tokio::spawn(async move {
                                     let mut cookie = cookie;
                                     Self::update_cookie_boundaries_if_due(&mut cookie, &handle).await;
@@ -143,7 +223,7 @@ impl ClaudeCodeState {
     pub(super) async fn materialize_non_stream_response(
         response: wreq::Response,
         show_fallback_notice: bool,
-    ) -> Result<(axum::response::Response, Option<(u64, u64)>), ClewdrError> {
+    ) -> Result<(axum::response::Response, Option<ExtractedUsage>), ClewdrError> {
         let status = response.status();
         let headers = response.headers().clone();
         let bytes = response.bytes().await.context(WreqSnafu {
@@ -168,24 +248,39 @@ impl ClaudeCodeState {
         Ok((response, usage))
     }
 
-    fn extract_usage_from_bytes(bytes: &[u8]) -> Option<(u64, u64)> {
-        if let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes)
-            && let Some(usage) = value.get("usage")
-        {
-            let token = |key| {
-                usage.get(key).and_then(|value| {
-                    value
-                        .as_u64()
-                        .or_else(|| value.as_i64().map(|n| n.max(0) as u64))
-                })
-            };
-            if let (Some(input), Some(output)) = (token("input_tokens"), token("output_tokens")) {
-                return Some((input, output));
+    fn extract_usage_from_bytes(bytes: &[u8]) -> Option<ExtractedUsage> {
+        if let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes) {
+            let model = value
+                .get("model")
+                .and_then(|m| m.as_str())
+                .map(str::to_string);
+            if let Some(usage) = value.get("usage") {
+                let token = |key| {
+                    usage.get(key).and_then(|value: &serde_json::Value| {
+                        value
+                            .as_u64()
+                            .or_else(|| value.as_i64().map(|n| n.max(0) as u64))
+                    })
+                };
+                if let (Some(input), Some(output)) = (token("input_tokens"), token("output_tokens"))
+                {
+                    return Some(ExtractedUsage {
+                        input,
+                        output,
+                        cache_read: token("cache_read_input_tokens").unwrap_or(0),
+                        cache_write: token("cache_creation_input_tokens").unwrap_or(0),
+                        model,
+                    });
+                }
             }
         }
         serde_json::from_slice::<CreateMessageResponse>(bytes)
             .ok()
-            .map(|response| (0, response.count_tokens() as u64))
+            .map(|response| ExtractedUsage {
+                input: 0,
+                output: response.count_tokens() as u64,
+                ..Default::default()
+            })
     }
 
     async fn update_cookie_boundaries_if_due(

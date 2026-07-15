@@ -239,6 +239,14 @@ impl CookieActor {
             if let Some(existing) = state.valid.iter_mut().find(|c| **c == cookie) {
                 *existing = cookie;
                 Self::save(state);
+            } else if let Some(existing) = state.exhausted.get(&cookie) {
+                // Also accept updates (account info, refreshed tokens) for
+                // exhausted cookies; equality is keyed on the cookie string.
+                // Keep the original cooldown so a stale clone can't un-exhaust it.
+                let mut updated = cookie;
+                updated.reset_time = existing.reset_time;
+                state.exhausted.replace(updated);
+                Self::save(state);
             }
             return;
         };

@@ -43,6 +43,19 @@ fn DeleteBtn(cookie: String) -> impl IntoView {
 }
 
 #[component]
+fn UsageBtn(cookie: String) -> impl IntoView {
+    let modal = expect_context::<RwSignal<Option<String>>>();
+    let title = use_i18n().t("usage.title");
+    view! {
+        <button
+            class="icon-copy"
+            title=title
+            on:click=move |_| modal.set(Some(cookie.clone()))
+        >"📊"</button>
+    }
+}
+
+#[component]
 pub fn ValidRow(cookie: CookieStatus) -> impl IntoView {
     let i18n = use_i18n();
     let cookie_str = StoredValue::new(cookie.cookie.clone());
@@ -50,6 +63,7 @@ pub fn ValidRow(cookie: CookieStatus) -> impl IntoView {
     let expanded = RwSignal::new(false);
 
     let details_cookie = cookie.clone();
+    let account = account_info_view(&cookie);
 
     view! {
         <div class="cookie-row">
@@ -68,6 +82,8 @@ pub fn ValidRow(cookie: CookieStatus) -> impl IntoView {
                     >"📋"</button>
                 </div>
 
+                {account}
+
                 <details style="margin-top:0.25rem">
                     <summary>{i18n.t("cookieStatus.meta.summary")}</summary>
                     <div class="stack-sm" style="margin-top:0.5rem">
@@ -77,6 +93,7 @@ pub fn ValidRow(cookie: CookieStatus) -> impl IntoView {
             </div>
             <div class="row-sm">
                 <span class="text-xs text-dim">{move || use_i18n().t("cookieStatus.status.available")}</span>
+                <UsageBtn cookie=cookie.cookie.clone() />
                 <DeleteBtn cookie=cookie.cookie />
             </div>
         </div>
@@ -87,6 +104,7 @@ pub fn ValidRow(cookie: CookieStatus) -> impl IntoView {
 pub fn ExhaustedRow(cookie: CookieStatus) -> impl IntoView {
     let i18n = use_i18n();
     let masked = utils::mask_str(&cookie.cookie, 6);
+    let account = account_info_view(&cookie);
 
     let cooldown = if let Some(ts) = cookie.reset_time {
         format!(
@@ -112,13 +130,50 @@ pub fn ExhaustedRow(cookie: CookieStatus) -> impl IntoView {
 
     view! {
         <div class="cookie-row">
-            <span class="text-mono text-xs truncate flex-1 cookie-token-exhausted">{masked}</span>
+            <div class="flex-1">
+                <span class="text-mono text-xs truncate cookie-token-exhausted">{masked}</span>
+                {account}
+            </div>
             <div class="row-sm">
                 <span class="text-xs text-dim">{cooldown}</span>
+                <UsageBtn cookie=cookie.cookie.clone() />
                 <DeleteBtn cookie=cookie.cookie />
             </div>
         </div>
     }
+}
+
+/// Human friendly plan name derived from Anthropic's rate_limit_tier.
+/// Personal-use simplification: anything that isn't Max is shown as Pro.
+fn plan_label(tier: &str) -> String {
+    let tl = tier.trim().to_ascii_lowercase();
+    if tl.contains("20x") {
+        "Max 20x".into()
+    } else if tl.contains("5x") {
+        "Max 5x".into()
+    } else if tl.contains("max") {
+        "Max".into()
+    } else {
+        "Pro".into()
+    }
+}
+
+/// Small line under the cookie string showing plan badge + account email
+fn account_info_view(cookie: &CookieStatus) -> Option<impl IntoView + use<>> {
+    let email = cookie.account_email.clone().filter(|e| !e.is_empty());
+    let plan = cookie.rate_limit_tier.clone().filter(|t| !t.is_empty());
+    if email.is_none() && plan.is_none() {
+        return None;
+    }
+    Some(view! {
+        <div class="row-sm" style="margin-top:0.25rem">
+            {plan.map(|t| {
+                let label = plan_label(&t);
+                view! { <span class="plan-badge" title=t>{label}</span> }
+            })}
+            {email.map(|e| view! { <span class="text-xs text-dim truncate">{e}</span> })}
+        </div>
+    })
 }
 
 #[component]

@@ -1,0 +1,47 @@
+# clewdr 魔改版 —— 独立部署，与 F:/docker/gproxy 的 clewdr(8484) 完全隔离
+# - clewdr-mod 仅挂 internal 网络(gproxy_app_internal)：结构上无直连外网，
+#   所有出站流量只能经 nat-socks:8118（与原版 clewdr 同等严格）
+# - 端口发布由 ingress sidecar(socat 纯转发) 完成：127.0.0.1:8485 -> clewdr-mod:8484
+# - 数据/配置: ./deploy/data/clewdr.toml（独立密码与 cookie，已 gitignore）
+# - 日常开发: 改完代码执行  docker compose up -d --build
+
+name: clewdr-mod
+
+services:
+  clewdr-mod:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: local/clewdr-mod:dev
+    container_name: clewdr-mod
+    hostname: clewdr-mod
+    restart: unless-stopped
+    environment:
+      TZ: "Asia/Shanghai"
+    volumes:
+      - ./deploy/data:/etc/clewdr
+    networks:
+      - gproxy_net   # 仅 internal 网络：出站只能走 nat-socks:8118
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
+
+  # 纯端口转发 sidecar：自身不发起任何业务流量
+  ingress:
+    image: alpine/socat:latest
+    container_name: clewdr-mod-ingress
+    restart: unless-stopped
+    command: TCP-LISTEN:8485,fork,reuseaddr TCP:clewdr-mod:8484
+    depends_on:
+      - clewdr-mod
+    ports:
+      - "127.0.0.1:8485:8485"
+    networks:
+      - gproxy_net   # 内网侧：转发给 clewdr-mod
+      - default      # 外网侧：仅用于向宿主机 127.0.0.1 发布端口
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
+
+networks:
+  gproxy_net:
+    external: true
+    name: gproxy_app_internal

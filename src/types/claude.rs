@@ -28,7 +28,12 @@ pub enum OutputEffort {
     Low,
     Medium,
     High,
+    #[serde(rename = "xhigh")]
+    XHigh,
     Max,
+    /// Forward-compatible passthrough for effort levels we don't know yet
+    #[serde(untagged)]
+    Other(String),
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -159,7 +164,11 @@ pub enum Thinking {
     },
     Disabled,
     Adaptive {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        /// Accepted from downstream for compatibility but deliberately NOT
+        /// forwarded upstream: keeps the upstream request identical to the
+        /// legacy clewdr instance (encrypted thinking, no summarized display).
+        #[serde(default, skip_serializing)]
+        #[allow(dead_code)]
         display: Option<String>,
     },
 }
@@ -880,6 +889,16 @@ pub struct Usage {
     pub input_tokens: u32,
     /// Output tokens used
     pub output_tokens: u32,
+    /// Cache write tokens (prompt caching)
+    #[serde(default, skip_serializing_if = "u32_is_zero")]
+    pub cache_creation_input_tokens: u32,
+    /// Cache read tokens (prompt caching)
+    #[serde(default, skip_serializing_if = "u32_is_zero")]
+    pub cache_read_input_tokens: u32,
+}
+
+fn u32_is_zero(v: &u32) -> bool {
+    *v == 0
 }
 
 #[derive(Debug, Deserialize, Serialize, Default)]

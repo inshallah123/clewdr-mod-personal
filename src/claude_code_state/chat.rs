@@ -16,6 +16,7 @@ use super::fable_fallback::{SERVER_SIDE_FALLBACK_BETA, apply_fable_to_opus48, is
 
 pub(super) const CLAUDE_BETA_BASE: &str = "oauth-2025-04-20";
 const CLAUDE_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
+const CLAUDE_PROFILE_URL: &str = "https://api.anthropic.com/api/oauth/profile";
 pub(super) const CLAUDE_API_VERSION: &str = "2023-06-01";
 
 impl ClaudeCodeState {
@@ -136,7 +137,7 @@ impl ClaudeCodeState {
         let response = self
             .execute_claude_request(&access_token, &p, enable_fable_fallback)
             .await?;
-        self.handle_success_response(response, model_family, enable_fable_fallback)
+        self.handle_success_response(response, model_family, enable_fable_fallback, p.model.clone())
             .await
     }
 
@@ -228,6 +229,65 @@ impl ClaudeCodeState {
             .context(WreqSnafu {
                 msg: "Failed to parse usage metrics response",
             })
+    }
+
+    /// Fetch account email and plan tier from the OAuth profile endpoint
+    /// (same approach as gproxy's `enrich_from_profile`).
+    /// Requires a valid access token; call after `fetch_usage_metrics` or
+    /// any flow that guarantees a fresh token.
+    ///
+    /// # Returns
+    /// * `Result<bool, ClewdrError>` - true if account info changed
+    pub async fn fetch_oauth_profile(&mut self) -> Result<bool, ClewdrError> {
+        let access_token = self
+            .cookie
+            .as_ref()
+            .and_then(|c| c.token.as_ref())
+            .ok_or(ClewdrError::UnexpectedNone {
+                msg: "No access token available",
+            })?
+            .access_token
+            .to_owned();
+
+        let profile = self
+            .client
+            .request(Method::GET, CLAUDE_PROFILE_URL)
+            .bearer_auth(access_token)
+            .header(ACCEPT, "application/json, text/plain, */*")
+            .header(USER_AGENT, CLAUDE_CODE_USER_AGENT)
+            .header("anthropic-beta", CLAUDE_BETA_BASE)
+            .send()
+            .await
+            .context(WreqSnafu {
+                msg: "Failed to fetch oauth profile",
+            })?
+            .check_claude()
+            .await?
+            .json::<serde_json::Value>()
+            .await
+            .context(WreqSnafu {
+                msg: "Failed to parse oauth profile response",
+            })?;
+
+        let email = profile
+            .get("account")
+            .and_then(|a| a.get("email"))
+            .and_then(|e| e.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        let tier = profile
+            .get("organization")
+            .and_then(|o| o.get("rate_limit_tier"))
+            .and_then(|t| t.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+
+        Ok(self
+            .cookie
+            .as_mut()
+            .is_some_and(|c| c.set_account_info(email, tier)))
     }
 
     pub async fn try_count_tokens(

@@ -77,6 +77,23 @@ impl ClaudeWebState {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
+        // Personal-use simplification: anything that isn't Max is Pro
+        let rate_limit_tier = boot_acc_info
+            .get("rate_limit_tier")
+            .and_then(|t| t.as_str())
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(str::to_string)
+            .or_else(|| {
+                let is_max = self.capabilities.iter().any(|c| c.contains("max"));
+                Some(if is_max { "max" } else { "pro" }.to_string())
+            });
+        if let Some(cookie) = self.cookie.as_mut() {
+            cookie.set_account_info(
+                Some(email.to_string()).filter(|e| !e.is_empty()),
+                rate_limit_tier,
+            );
+        }
         if !self.is_pro() && CLEWDR_CONFIG.load().skip_non_pro {
             return Err(Reason::Free.into());
         }

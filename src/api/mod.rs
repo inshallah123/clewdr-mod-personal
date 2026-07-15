@@ -4,6 +4,7 @@ mod config;
 mod error;
 mod misc;
 pub(crate) mod usage;
+mod usage_stats;
 pub use claude_code::{api_claude_code, api_claude_code_count_tokens};
 /// Message handling endpoints for creating and managing chat conversations
 pub use claude_web::api_claude_web;
@@ -14,4 +15,6 @@ pub use error::ApiError;
 pub use misc::{
     api_auth, api_delete_cookie, api_get_cookies, api_get_models, api_post_cookie, api_version,
 };
+/// Usage & cost statistics endpoints
+pub use usage_stats::{api_usage_series, api_usage_summary};
 // merged above

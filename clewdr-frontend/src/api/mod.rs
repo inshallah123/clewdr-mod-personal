@@ -106,6 +106,22 @@ pub async fn get_config() -> Result<ConfigData, String> {
     authed_get("/api/config").await
 }
 
+pub async fn get_usage_summary() -> Result<crate::types::UsageSummaryApi, String> {
+    authed_get("/api/usage/summary").await
+}
+
+pub async fn get_usage_series(
+    bucket: &str,
+    days: i64,
+    cookie: Option<&str>,
+) -> Result<crate::types::UsageSeriesApi, String> {
+    let mut url = format!("/api/usage/series?bucket={bucket}&days={days}");
+    if let Some(c) = cookie.filter(|c| !c.is_empty()) {
+        url.push_str(&format!("&cookie={}", js_sys::encode_uri_component(c)));
+    }
+    authed_get(&url).await
+}
+
 pub async fn save_config(config: &ConfigData) -> Result<(), String> {
     authed_post("/api/config", config).await
 }

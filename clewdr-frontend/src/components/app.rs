@@ -4,7 +4,7 @@ use wasm_bindgen_futures::spawn_local;
 
 use super::{
     auth::AuthGatekeeper, config_tab::ConfigTab, cookie::CookieVisualization,
-    cookie_submit::CookieSubmitForm,
+    cookie_submit::CookieSubmitForm, stats::StatsTab,
 };
 use crate::{
     api,
@@ -17,6 +17,7 @@ enum Tab {
     Claude,
     Config,
     Auth,
+    Stats,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -118,6 +119,7 @@ pub fn App() -> impl IntoView {
                                 }.into_any(),
                                 Tab::Config => view! { <ConfigTab /> }.into_any(),
                                 Tab::Auth => view! { <LogoutPanel is_authenticated /> }.into_any(),
+                                Tab::Stats => view! { <StatsTab /> }.into_any(),
                             }}
                         </Show>
                     </div>
@@ -239,6 +241,7 @@ fn TabBar(active_tab: RwSignal<Tab>) -> impl IntoView {
         (Tab::Claude, "tabs.claude"),
         (Tab::Config, "tabs.config"),
         (Tab::Auth, "tabs.auth"),
+        (Tab::Stats, "tabs.stats"),
     ];
     view! {
         <div class="tabs">

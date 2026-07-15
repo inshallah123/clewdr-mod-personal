@@ -38,11 +38,11 @@ pub struct CookieStatusQuery {
     refresh: bool,
 }
 
-/// Global cache for cookie status responses (TTL: 5 minutes)
+/// Global cache for cookie status responses (TTL: 10 seconds)
 static COOKIES_CACHE: LazyLock<Cache<String, CookieStatusCache>> = LazyLock::new(|| {
     Cache::builder()
         .max_capacity(1)
-        .time_to_live(Duration::from_secs(300)) // 5 minutes
+        .time_to_live(Duration::from_secs(10)) // 10 seconds
         .build()
 });
 
@@ -373,6 +373,20 @@ async fn try_oauth_usage(
         return Err(());
     };
     let result = state.fetch_usage_metrics().await;
+    // Opportunistically backfill account email / plan tier while we hold a
+    // fresh access token (persisted via return_cookie below)
+    if result.is_ok()
+        && state
+            .cookie
+            .as_ref()
+            .is_some_and(|c| c.account_email.is_none() || c.rate_limit_tier.is_none())
+        && let Err(e) = state.fetch_oauth_profile().await
+    {
+        warn!(
+            "try_oauth_usage: profile fetch failed for {}: {}",
+            cookie.cookie, e
+        );
+    }
     state.return_cookie(None).await;
     result
         .inspect_err(|e| {

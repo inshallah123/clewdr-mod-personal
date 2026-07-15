@@ -57,6 +57,14 @@ pub struct CookieStatus {
     #[serde(default)]
     pub count_tokens_allowed: Option<bool>,
 
+    /// Account email address (fetched from bootstrap / oauth profile)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_email: Option<String>,
+    /// Subscription plan tier, e.g. "default_claude_max_20x" (fetched from
+    /// bootstrap organization / oauth profile, same source as gproxy)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_limit_tier: Option<String>,
+
     // New: Per-period usage breakdown
     #[serde(default)]
     pub session_usage: UsageBreakdown,
@@ -138,6 +146,8 @@ impl CookieStatus {
             reset_time,
             fable_reset_time: None,
             count_tokens_allowed: None,
+            account_email: None,
+            rate_limit_tier: None,
 
             session_usage: UsageBreakdown::default(),
             weekly_usage: UsageBreakdown::default(),
@@ -197,6 +207,21 @@ impl CookieStatus {
 
     pub fn set_count_tokens_allowed(&mut self, value: Option<bool>) {
         self.count_tokens_allowed = value;
+    }
+
+    /// Update account email / plan tier if new information is available.
+    /// Returns true if anything changed (caller may persist).
+    pub fn set_account_info(&mut self, email: Option<String>, tier: Option<String>) -> bool {
+        let mut changed = false;
+        if email.is_some() && self.account_email != email {
+            self.account_email = email;
+            changed = true;
+        }
+        if tier.is_some() && self.rate_limit_tier != tier {
+            self.rate_limit_tier = tier;
+            changed = true;
+        }
+        changed
     }
 
     pub fn reset_window_usage(&mut self) {
