@@ -25,6 +25,8 @@ pub struct ConfigApi {
     #[serde(default)]
     pub enable_web_count_tokens: bool,
     #[serde(default)]
+    pub enable_fable_fallback: bool,
+    #[serde(default)]
     pub sanitize_messages: bool,
     #[serde(default)]
     pub skip_first_warning: bool,

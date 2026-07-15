@@ -68,6 +68,7 @@ pub async fn api_post_cookie(
         return Err(ApiError::unauthorized());
     }
     c.reset_time = None;
+    c.fable_reset_time = None;
     info!("Cookie accepted: {}", c.cookie);
     match s.submit(c).await {
         Ok(_) => {

@@ -1,6 +1,8 @@
 mod chat;
 mod exchange;
+mod fable_fallback;
 mod organization;
+mod response;
 use http::{
     HeaderValue, Method,
     header::{COOKIE, ORIGIN, REFERER, USER_AGENT},
@@ -116,6 +118,18 @@ impl ClaudeCodeState {
             .cookie_actor_handle
             .request(self.system_prompt_hash)
             .await?;
+        self.use_cookie(res).await
+    }
+
+    pub async fn request_fable_cookie(&mut self) -> Result<CookieStatus, ClewdrError> {
+        let res = self
+            .cookie_actor_handle
+            .request_fable(self.system_prompt_hash)
+            .await?;
+        self.use_cookie(res).await
+    }
+
+    async fn use_cookie(&mut self, res: CookieStatus) -> Result<CookieStatus, ClewdrError> {
         self.cookie = Some(res.to_owned());
         self.cookie_header_value = HeaderValue::from_str(res.cookie.to_string().as_str())?;
         // Always pull latest proxy/endpoint before building the client

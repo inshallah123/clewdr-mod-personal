@@ -143,6 +143,7 @@
         "preserveChats": "保留聊天",
         "webSearch": "网页搜索",
         "webCountTokens": "允许 Web 渠道调用 count_tokens",
+        "fableFallback": "Fable额度耗尽后由Opus 4.8接管",
         "sanitizeMessages": "消息清理（去除空白）"
       },
       "cookie": {

@@ -50,6 +50,10 @@ pub struct CookieStatus {
     pub token: Option<TokenInfo>,
     #[serde(default)]
     pub reset_time: Option<i64>,
+    /// Model-scoped Fable cooldown. Unlike `reset_time`, this does not block
+    /// the cookie from serving Sonnet or Opus requests.
+    #[serde(default)]
+    pub fable_reset_time: Option<i64>,
     #[serde(default)]
     pub count_tokens_allowed: Option<bool>,
 
@@ -132,6 +136,7 @@ impl CookieStatus {
             cookie,
             token: None,
             reset_time,
+            fable_reset_time: None,
             count_tokens_allowed: None,
 
             session_usage: UsageBreakdown::default(),
@@ -163,6 +168,7 @@ impl CookieStatus {
             info!("Cookie reset time expired");
             return Self {
                 reset_time: None,
+                fable_reset_time: None,
                 session_usage: UsageBreakdown::default(),
                 weekly_usage: UsageBreakdown::default(),
                 weekly_sonnet_usage: UsageBreakdown::default(),
@@ -171,6 +177,18 @@ impl CookieStatus {
             };
         }
         self
+    }
+
+    pub fn fable_available(&self, now: i64) -> bool {
+        self.fable_reset_time.is_none_or(|reset| reset <= now)
+    }
+
+    pub fn clear_expired_fable_cooldown(&mut self, now: i64) -> bool {
+        if self.fable_reset_time.is_some_and(|reset| reset <= now) {
+            self.fable_reset_time = None;
+            return true;
+        }
+        false
     }
 
     pub fn add_token(&mut self, token: TokenInfo) {

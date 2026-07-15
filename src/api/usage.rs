@@ -1,20 +1,20 @@
 use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(super) struct UsageMetric {
+pub(crate) struct UsageMetric {
     pub utilization: f64,
     pub resets_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(super) struct UsageFields {
+pub(crate) struct UsageFields {
     pub five_hour: UsageMetric,
     pub seven_day: UsageMetric,
     pub seven_day_sonnet: Option<UsageMetric>,
     pub seven_day_fable: Option<UsageMetric>,
 }
 
-pub(super) fn extract_usage_fields(usage: &Value) -> Option<UsageFields> {
+pub(crate) fn extract_usage_fields(usage: &Value) -> Option<UsageFields> {
     let five_hour = metric_from_window(usage.get("five_hour"))
         .or_else(|| metric_from_limit(usage, "session"))?;
     let seven_day = metric_from_window(usage.get("seven_day"))

@@ -5,7 +5,6 @@ use colored::Colorize;
 use moka::sync::Cache;
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 use serde::Serialize;
-use snafu::{GenerateImplicitData, Location};
 use tracing::{error, info, warn};
 
 use crate::{
@@ -13,7 +12,7 @@ use crate::{
     error::ClewdrError,
 };
 
-const INTERVAL: u64 = 300;
+pub(super) const INTERVAL: u64 = 300;
 const SESSION_WINDOW_SECS: i64 = 5 * 60 * 60; // 5h
 const WEEKLY_WINDOW_SECS: i64 = 7 * 24 * 60 * 60; // 7d
 
@@ -26,7 +25,7 @@ pub struct CookieStatusInfo {
 
 /// Messages that the CookieActor can handle
 #[derive(Debug)]
-enum CookieActorMessage {
+pub(super) enum CookieActorMessage {
     /// Return a Cookie
     Return(CookieStatus, Option<Reason>),
     /// Submit a new Cookie
@@ -34,16 +33,26 @@ enum CookieActorMessage {
     /// Check for timed out Cookies
     CheckReset,
     /// Request to get a Cookie
-    Request(Option<u64>, RpcReplyPort<Result<CookieStatus, ClewdrError>>),
+    Request(
+        CookieRequestScope,
+        Option<u64>,
+        RpcReplyPort<Result<CookieStatus, ClewdrError>>,
+    ),
     /// Get all Cookie status information
     GetStatus(RpcReplyPort<CookieStatusInfo>),
     /// Delete a Cookie
     Delete(CookieStatus, RpcReplyPort<Result<(), ClewdrError>>),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum CookieRequestScope {
+    Any,
+    Fable,
+}
+
 /// CookieActor state - manages collections of cookies
 #[derive(Debug)]
-struct CookieActorState {
+pub(super) struct CookieActorState {
     valid: VecDeque<CookieStatus>,
     exhausted: HashSet<CookieStatus>,
     invalid: HashSet<UselessCookie>,
@@ -51,7 +60,7 @@ struct CookieActorState {
 }
 
 /// Cookie actor that handles cookie distribution, collection, and status tracking using Ractor
-struct CookieActor;
+pub(super) struct CookieActor;
 
 impl CookieActor {
     /// Saves the current state of cookies to the configuration
@@ -172,25 +181,51 @@ impl CookieActor {
         changed
     }
 
+    fn refresh_fable_cooldowns(state: &mut CookieActorState) -> bool {
+        let now = Utc::now().timestamp();
+        let mut changed = false;
+        for cookie in state.valid.iter_mut() {
+            changed |= cookie.clear_expired_fable_cooldown(now);
+        }
+        changed
+    }
+
     /// Dispatches a cookie for use
     fn dispatch(
         &self,
         state: &mut CookieActorState,
+        scope: CookieRequestScope,
         hash: Option<u64>,
     ) -> Result<CookieStatus, ClewdrError> {
         Self::reset(state);
+        if Self::refresh_fable_cooldowns(state) {
+            Self::save(state);
+        }
+        let now = Utc::now().timestamp();
+        let eligible =
+            |cookie: &CookieStatus| scope == CookieRequestScope::Any || cookie.fable_available(now);
         if let Some(hash) = hash
             && let Some(cookie) = state.moka.get(&hash)
             && let Some(cookie) = state.valid.iter().find(|&c| c == &cookie)
+            && eligible(cookie)
         {
             // renew moka cache
             state.moka.insert(hash, cookie.clone());
             return Ok(cookie.clone());
         }
+        let Some(index) = state.valid.iter().position(eligible) else {
+            return if scope == CookieRequestScope::Fable && !state.valid.is_empty() {
+                Err(ClewdrError::FableQuotaExhausted)
+            } else {
+                Err(ClewdrError::NoCookieAvailable)
+            };
+        };
         let cookie = state
             .valid
-            .pop_front()
-            .ok_or(ClewdrError::NoCookieAvailable)?;
+            .remove(index)
+            .ok_or(ClewdrError::UnexpectedNone {
+                msg: "Eligible cookie disappeared during dispatch",
+            })?;
         state.valid.push_back(cookie.clone());
         if let Some(hash) = hash {
             state.moka.insert(hash, cookie.clone());
@@ -221,6 +256,14 @@ impl CookieActor {
                 if !state.exhausted.insert(cookie) {
                     return;
                 }
+            }
+            Reason::FableRateLimited(i) => {
+                cookie.fable_reset_time = Some(i);
+                if let Some(existing) = state.valid.iter_mut().find(|c| **c == cookie) {
+                    *existing = cookie;
+                    Self::save(state);
+                }
+                return;
             }
             Reason::Restricted(i) => {
                 find_remove(&cookie);
@@ -369,8 +412,8 @@ impl Actor for CookieActor {
                 }
                 Self::reset(state);
             }
-            CookieActorMessage::Request(cache_hash, reply_port) => {
-                let result = self.dispatch(state, cache_hash);
+            CookieActorMessage::Request(scope, cache_hash, reply_port) => {
+                let result = self.dispatch(state, scope, cache_hash);
                 reply_port.send(result)?;
             }
             CookieActorMessage::GetStatus(reply_port) => {
@@ -402,90 +445,5 @@ impl Actor for CookieActor {
 /// Handle for interacting with the CookieActor
 #[derive(Clone)]
 pub struct CookieActorHandle {
-    actor_ref: ActorRef<CookieActorMessage>,
-}
-
-impl CookieActorHandle {
-    /// Create a new CookieActor and return a handle to it
-    pub async fn start() -> Result<Self, ractor::SpawnErr> {
-        let (actor_ref, _join_handle) = Actor::spawn(None, CookieActor, ()).await?;
-
-        // Start the timeout checker
-        let handle = Self {
-            actor_ref: actor_ref.clone(),
-        };
-        handle.spawn_timeout_checker().await;
-
-        Ok(handle)
-    }
-
-    /// Spawns a timeout checker task
-    async fn spawn_timeout_checker(&self) {
-        let actor_ref = self.actor_ref.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(INTERVAL));
-            loop {
-                interval.tick().await;
-                if ractor::cast!(actor_ref, CookieActorMessage::CheckReset).is_err() {
-                    break;
-                }
-            }
-        });
-    }
-
-    /// Request a cookie from the cookie actor
-    pub async fn request(&self, cache_hash: Option<u64>) -> Result<CookieStatus, ClewdrError> {
-        ractor::call!(self.actor_ref, CookieActorMessage::Request, cache_hash).map_err(|e| {
-            ClewdrError::RactorError {
-                loc: Location::generate(),
-                msg: format!("Failed to communicate with CookieActor for request operation: {e}"),
-            }
-        })?
-    }
-
-    /// Return a cookie to the cookie actor
-    pub async fn return_cookie(
-        &self,
-        cookie: CookieStatus,
-        reason: Option<Reason>,
-    ) -> Result<(), ClewdrError> {
-        ractor::cast!(self.actor_ref, CookieActorMessage::Return(cookie, reason)).map_err(|e| {
-            ClewdrError::RactorError {
-                loc: Location::generate(),
-                msg: format!("Failed to communicate with CookieActor for return operation: {e}"),
-            }
-        })
-    }
-
-    /// Submit a new cookie to the cookie actor
-    pub async fn submit(&self, cookie: CookieStatus) -> Result<(), ClewdrError> {
-        ractor::cast!(self.actor_ref, CookieActorMessage::Submit(cookie)).map_err(|e| {
-            ClewdrError::RactorError {
-                loc: Location::generate(),
-                msg: format!("Failed to communicate with CookieActor for submit operation: {e}"),
-            }
-        })
-    }
-
-    /// Get status information about all cookies
-    pub async fn get_status(&self) -> Result<CookieStatusInfo, ClewdrError> {
-        ractor::call!(self.actor_ref, CookieActorMessage::GetStatus).map_err(|e| {
-            ClewdrError::RactorError {
-                loc: Location::generate(),
-                msg: format!(
-                    "Failed to communicate with CookieActor for get status operation: {e}"
-                ),
-            }
-        })
-    }
-
-    /// Delete a cookie from the cookie actor
-    pub async fn delete_cookie(&self, cookie: CookieStatus) -> Result<(), ClewdrError> {
-        ractor::call!(self.actor_ref, CookieActorMessage::Delete, cookie).map_err(|e| {
-            ClewdrError::RactorError {
-                loc: Location::generate(),
-                msg: format!("Failed to communicate with CookieActor for delete operation: {e}"),
-            }
-        })?
-    }
+    pub(super) actor_ref: ActorRef<CookieActorMessage>,
 }

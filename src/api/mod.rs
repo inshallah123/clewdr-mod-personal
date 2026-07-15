@@ -3,7 +3,7 @@ mod claude_web;
 mod config;
 mod error;
 mod misc;
-mod usage;
+pub(crate) mod usage;
 pub use claude_code::{api_claude_code, api_claude_code_count_tokens};
 /// Message handling endpoints for creating and managing chat conversations
 pub use claude_web::api_claude_web;

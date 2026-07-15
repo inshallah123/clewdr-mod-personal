@@ -162,5 +162,8 @@ fn get_reason_text(reason: &Option<Reason>) -> String {
                 format_timestamp(*ts)
             )
         }
+        Reason::FableRateLimited(ts) => {
+            format!("Fable {}", format_timestamp(*ts))
+        }
     }
 }

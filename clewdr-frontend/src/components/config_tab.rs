@@ -99,6 +99,7 @@ pub fn ConfigTab() -> impl IntoView {
                 "preserve_chats" => c.preserve_chats = checked,
                 "web_search" => c.web_search = checked,
                 "enable_web_count_tokens" => c.enable_web_count_tokens = checked,
+                "enable_fable_fallback" => c.enable_fable_fallback = checked,
                 "sanitize_messages" => c.sanitize_messages = checked,
                 "skip_first_warning" => c.skip_first_warning = checked,
                 "skip_second_warning" => c.skip_second_warning = checked,
@@ -203,6 +204,7 @@ pub fn ConfigTab() -> impl IntoView {
                                         <Checkbox name="preserve_chats" label=i18n.t("config.sections.api.preserveChats") checked=cfg.preserve_chats on_input=on_checkbox />
                                         <Checkbox name="web_search" label=i18n.t("config.sections.api.webSearch") checked=cfg.web_search on_input=on_checkbox />
                                         <Checkbox name="enable_web_count_tokens" label=i18n.t("config.sections.api.webCountTokens") checked=cfg.enable_web_count_tokens on_input=on_checkbox />
+                                        <Checkbox name="enable_fable_fallback" label=i18n.t("config.sections.api.fableFallback") checked=cfg.enable_fable_fallback on_input=on_checkbox />
                                         <Checkbox name="sanitize_messages" label=i18n.t("config.sections.api.sanitizeMessages") checked=cfg.sanitize_messages on_input=on_checkbox />
                                     </div>
                                 </ConfigSection>

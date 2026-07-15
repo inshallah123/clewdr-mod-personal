@@ -88,6 +88,10 @@ pub enum ClewdrError {
     BadRequest { msg: &'static str },
     #[snafu(display("Retries exceeded"))]
     TooManyRetries,
+    #[snafu(display(
+        "Fable 7-day quota is exhausted across all available cookies; the stream was stopped"
+    ))]
+    FableQuotaExhausted,
     #[snafu(display("EventSource error: {}", source))]
     #[snafu(context(false))]
     EventSourceAxumError {
@@ -203,6 +207,12 @@ impl IntoResponse for ClewdrError {
                 (source.status(), json!(source.body_text()))
             }
             ClewdrError::TooManyRetries => (StatusCode::GATEWAY_TIMEOUT, json!(self.to_string())),
+            ClewdrError::FableQuotaExhausted => (
+                StatusCode::TOO_MANY_REQUESTS,
+                json!(
+                    "Fable 7日配额已在所有可用 Cookie 中耗尽，流式响应已终止（Fable quota exhausted across all available cookies）。"
+                ),
+            ),
             ClewdrError::InvalidCookie { .. } => (StatusCode::BAD_REQUEST, json!(self.to_string())),
             ClewdrError::PathNotFound { .. } => (StatusCode::NOT_FOUND, json!(self.to_string())),
             ClewdrError::InvalidAuth => (StatusCode::UNAUTHORIZED, json!(self.to_string())),

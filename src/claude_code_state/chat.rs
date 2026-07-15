@@ -1,12 +1,7 @@
-use axum::{
-    Json,
-    response::{IntoResponse, Sse, sse::Event as SseEvent},
-};
+use axum::{Json, response::IntoResponse};
 use colored::Colorize;
-use eventsource_stream::Eventsource;
-use futures::TryStreamExt;
 use http::header::{ACCEPT, USER_AGENT};
-use snafu::{GenerateImplicitData, ResultExt};
+use snafu::ResultExt;
 use tracing::{Instrument, error, info, warn};
 use wreq::Method;
 
@@ -14,9 +9,10 @@ use crate::{
     claude_code_state::{ClaudeCodeState, TokenStatus},
     config::{CLAUDE_CODE_USER_AGENT, CLEWDR_CONFIG, ModelFamily},
     error::{CheckClaudeErr, ClewdrError, WreqSnafu},
-    services::cookie_actor::CookieActorHandle,
     types::claude::{CountMessageTokensResponse, CreateMessageParams},
 };
+
+use super::fable_fallback::{SERVER_SIDE_FALLBACK_BETA, apply_fable_to_opus48, is_fable_model};
 
 pub(super) const CLAUDE_BETA_BASE: &str = "oauth-2025-04-20";
 const CLAUDE_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
@@ -45,6 +41,16 @@ impl ClaudeCodeState {
         &mut self,
         p: CreateMessageParams,
     ) -> Result<axum::response::Response, ClewdrError> {
+        if is_fable_model(&p.model) {
+            return self.try_fable_chat(p).await;
+        }
+        self.try_standard_chat(p).await
+    }
+
+    async fn try_standard_chat(
+        &mut self,
+        p: CreateMessageParams,
+    ) -> Result<axum::response::Response, ClewdrError> {
         for i in 0..CLEWDR_CONFIG.load().max_retries + 1 {
             if i > 0 {
                 info!("[RETRY] attempt: {}", i.to_string().green());
@@ -53,38 +59,12 @@ impl ClaudeCodeState {
             let p = p.to_owned();
 
             let cookie = state.request_cookie().await?;
-            let retry = async {
-                match state.check_token() {
-                    TokenStatus::None => {
-                        info!("No token found, requesting new token");
-                        let org = state.get_organization().await?;
-                        let code_res = state.exchange_code(&org).await?;
-                        state.exchange_token(code_res).await?;
-                        state.return_cookie(None).await;
-                    }
-                    TokenStatus::Expired => {
-                        info!("Token expired, refreshing token");
-                        state.refresh_token().await?;
-                        state.return_cookie(None).await;
-                    }
-                    TokenStatus::Valid => {
-                        info!("Token is valid, proceeding with request");
-                    }
-                }
-                let Some(access_token) = state.cookie.as_ref().and_then(|c| c.token.to_owned())
-                else {
-                    return Err(ClewdrError::UnexpectedNone {
-                        msg: "No access token found in cookie",
-                    });
-                };
-                state
-                    .send_chat(access_token.access_token.to_owned(), p)
-                    .await
-            }
-            .instrument(tracing::info_span!(
-                "claude_code",
-                "cookie" = cookie.cookie.mask()
-            ));
+            let retry = state
+                .send_with_current_cookie(p, false)
+                .instrument(tracing::info_span!(
+                    "claude_code",
+                    "cookie" = cookie.cookie.mask()
+                ));
             match retry.await {
                 Ok(res) => {
                     return Ok(res);
@@ -107,25 +87,69 @@ impl ClaudeCodeState {
         Err(ClewdrError::TooManyRetries)
     }
 
+    pub(super) async fn send_with_current_cookie(
+        &mut self,
+        p: CreateMessageParams,
+        enable_fable_fallback: bool,
+    ) -> Result<axum::response::Response, ClewdrError> {
+        match self.check_token() {
+            TokenStatus::None => {
+                info!("No token found, requesting new token");
+                let org = self.get_organization().await?;
+                let code_res = self.exchange_code(&org).await?;
+                self.exchange_token(code_res).await?;
+                self.return_cookie(None).await;
+            }
+            TokenStatus::Expired => {
+                info!("Token expired, refreshing token");
+                self.refresh_token().await?;
+                self.return_cookie(None).await;
+            }
+            TokenStatus::Valid => info!("Token is valid, proceeding with request"),
+        }
+        let access_token = self
+            .cookie
+            .as_ref()
+            .and_then(|cookie| cookie.token.as_ref())
+            .ok_or(ClewdrError::UnexpectedNone {
+                msg: "No access token found in cookie",
+            })?
+            .access_token
+            .clone();
+        self.send_chat(access_token, p, enable_fable_fallback).await
+    }
+
     pub async fn send_chat(
         &mut self,
         access_token: String,
         mut p: CreateMessageParams,
+        enable_fable_fallback: bool,
     ) -> Result<axum::response::Response, ClewdrError> {
         if let Some(stripped) = p.model.strip_suffix("-1M") {
             p.model = stripped.to_string();
         }
-        let model_family = Self::classify_model(&p.model);
-        let response = self.execute_claude_request(&access_token, &p).await?;
-        self.handle_success_response(response, model_family).await
+        let model_family = if enable_fable_fallback {
+            ModelFamily::Opus
+        } else {
+            Self::classify_model(&p.model)
+        };
+        let response = self
+            .execute_claude_request(&access_token, &p, enable_fable_fallback)
+            .await?;
+        self.handle_success_response(response, model_family, enable_fable_fallback)
+            .await
     }
 
     async fn execute_claude_request(
         &mut self,
         access_token: &str,
         body: &CreateMessageParams,
+        enable_fable_fallback: bool,
     ) -> Result<wreq::Response, ClewdrError> {
-        let beta_header = Self::build_beta_header(self.anthropic_beta_header.as_deref());
+        let mut body = serde_json::to_value(body)?;
+        let fallback_applied = enable_fable_fallback && apply_fable_to_opus48(&mut body);
+        let beta_header =
+            Self::build_beta_header(self.anthropic_beta_header.as_deref(), fallback_applied);
         self.client
             .post(
                 self.endpoint
@@ -140,7 +164,7 @@ impl ClaudeCodeState {
             .header(USER_AGENT, CLAUDE_CODE_USER_AGENT)
             .header("anthropic-beta", beta_header)
             .header("anthropic-version", CLAUDE_API_VERSION)
-            .json(body)
+            .json(&body)
             .send()
             .await
             .context(WreqSnafu {
@@ -297,7 +321,7 @@ impl ClaudeCodeState {
         {
             Ok(response) => {
                 self.persist_count_tokens_allowed(true).await;
-                let (resp, _) = Self::materialize_non_stream_response(response).await?;
+                let (resp, _) = Self::materialize_non_stream_response(response, false).await?;
                 Ok(resp)
             }
             Err(err) => {
@@ -312,151 +336,12 @@ impl ClaudeCodeState {
         }
     }
 
-    async fn handle_success_response(
-        &mut self,
-        response: wreq::Response,
-        model_family: ModelFamily,
-    ) -> Result<axum::response::Response, ClewdrError> {
-        if !self.stream {
-            let (resp, usage_pair) = Self::materialize_non_stream_response(response).await?;
-            let (input, output) = usage_pair.unwrap_or((self.usage.input_tokens as u64, 0));
-            self.persist_usage_totals(input, output, model_family).await;
-            Ok(resp)
-        } else {
-            // Stream pass-through while accumulating output token usage from message_delta events
-            return self.forward_stream_with_usage(response, model_family).await;
-        }
-    }
-
-    async fn persist_usage_totals(&mut self, input: u64, output: u64, family: ModelFamily) {
-        if input == 0 && output == 0 {
-            return;
-        }
-        if let Some(cookie) = self.cookie.as_mut() {
-            // Lazy boundary refresh if due, then reset period counters and start fresh
-            Self::update_cookie_boundaries_if_due(cookie, &self.cookie_actor_handle).await;
-            cookie.add_and_bucket_usage(input, output, family);
-            let cloned = cookie.clone();
-            if let Err(err) = self.cookie_actor_handle.return_cookie(cloned, None).await {
-                warn!("Failed to persist usage statistics: {}", err);
-            }
-        }
-    }
-
-    async fn forward_stream_with_usage(
-        &mut self,
-        response: wreq::Response,
-        family: ModelFamily,
-    ) -> Result<axum::response::Response, ClewdrError> {
-        use std::sync::{
-            Arc,
-            atomic::{AtomicU64, Ordering},
-        };
-
-        let input_tokens = self.usage.input_tokens as u64;
-        let output_sum = Arc::new(AtomicU64::new(0));
-        let handle = self.cookie_actor_handle.clone();
-        let cookie = self.cookie.clone();
-
-        let osum = output_sum.clone();
-        let stream = response.bytes_stream().eventsource().map_ok(move |event| {
-            // accumulate output tokens from message_delta usage if present
-            if let Ok(parsed) =
-                serde_json::from_str::<crate::types::claude::StreamEvent>(&event.data)
-            {
-                match parsed {
-                    crate::types::claude::StreamEvent::MessageDelta { usage: Some(u), .. } => {
-                        osum.fetch_add(u.output_tokens as u64, Ordering::Relaxed);
-                    }
-                    crate::types::claude::StreamEvent::MessageStop => {
-                        // on stream completion, persist totals asynchronously
-                        if let (Some(cookie), handle) = (cookie.clone(), handle.clone()) {
-                            let total_out = osum.load(Ordering::Relaxed);
-                            let mut c = cookie.clone();
-                            tokio::spawn(async move {
-                                // Update period boundaries if needed, then accumulate
-                                ClaudeCodeState::update_cookie_boundaries_if_due(&mut c, &handle)
-                                    .await;
-                                c.add_and_bucket_usage(input_tokens, total_out, family);
-                                let _ = handle.return_cookie(c, None).await;
-                            });
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            // mirror upstream SSE event unchanged
-            let e = SseEvent::default().event(event.event).id(event.id);
-            let e = if let Some(retry) = event.retry {
-                e.retry(retry)
-            } else {
-                e
-            };
-            e.data(event.data)
-        });
-
-        Ok(Sse::new(stream)
-            .keep_alive(Default::default())
-            .into_response())
-    }
-
-    async fn materialize_non_stream_response(
-        response: wreq::Response,
-    ) -> Result<(axum::response::Response, Option<(u64, u64)>), ClewdrError> {
-        let status = response.status();
-        let headers = response.headers().clone();
-        let bytes = response.bytes().await.context(WreqSnafu {
-            msg: "Failed to read Claude response body",
-        })?;
-        let usage = Self::extract_usage_from_bytes(&bytes);
-
-        let mut builder = http::Response::builder().status(status);
-        for (key, value) in headers.iter() {
-            builder = builder.header(key, value);
-        }
-        let response =
-            builder
-                .body(axum::body::Body::from(bytes))
-                .map_err(|e| ClewdrError::HttpError {
-                    loc: snafu::Location::generate(),
-                    source: e,
-                })?;
-        Ok((response, usage))
-    }
-
-    fn extract_usage_from_bytes(bytes: &[u8]) -> Option<(u64, u64)> {
-        // Prefer explicit usage if present
-        if let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes)
-            && let Some(usage) = value.get("usage")
-        {
-            let input = usage
-                .get("input_tokens")
-                .and_then(|v| v.as_u64().or_else(|| v.as_i64().map(|n| n.max(0) as u64)));
-            let output = usage
-                .get("output_tokens")
-                .and_then(|v| v.as_u64().or_else(|| v.as_i64().map(|n| n.max(0) as u64)));
-            if let (Some(i), Some(o)) = (input, output) {
-                return Some((i, o));
-            }
-        }
-
-        // Fallback: estimate output tokens from the Claude response content
-        if let Ok(parsed) =
-            serde_json::from_slice::<crate::types::claude::CreateMessageResponse>(bytes)
-        {
-            let output_tokens = parsed.count_tokens() as u64;
-            // Input tokens already computed earlier and present in self.usage; only estimate output here
-            return Some((0, output_tokens));
-        }
-        None
-    }
-
     async fn execute_claude_count_tokens_request(
         &mut self,
         access_token: &str,
         body: &CreateMessageParams,
     ) -> Result<wreq::Response, ClewdrError> {
-        let beta_header = Self::build_beta_header(self.anthropic_beta_header.as_deref());
+        let beta_header = Self::build_beta_header(self.anthropic_beta_header.as_deref(), false);
         self.client
             .post(
                 self.endpoint
@@ -481,147 +366,24 @@ impl ClaudeCodeState {
             .await
     }
 
-    fn build_beta_header(extra: Option<&str>) -> String {
+    fn build_beta_header(extra: Option<&str>, enable_fable_fallback: bool) -> String {
         let mut parts = vec![CLAUDE_BETA_BASE.to_string()];
         if let Some(extra) = extra {
             for token in extra.split(',') {
                 let t = token.trim();
-                if !t.is_empty() {
+                if !t.is_empty() && !parts.iter().any(|part| part == t) {
                     parts.push(t.to_string());
                 }
             }
+        }
+        if enable_fable_fallback && !parts.iter().any(|part| part == SERVER_SIDE_FALLBACK_BETA) {
+            parts.push(SERVER_SIDE_FALLBACK_BETA.to_string());
         }
         parts.join(",")
     }
 
     fn classify_model(model: &str) -> ModelFamily {
         ModelFamily::classify(model)
-    }
-
-    // ---------------------------------------------
-    // Lazy boundary refresh (no timers, fetch-on-due)
-    // ---------------------------------------------
-    async fn update_cookie_boundaries_if_due(
-        cookie: &mut crate::config::CookieStatus,
-        handle: &crate::services::cookie_actor::CookieActorHandle,
-    ) {
-        let now = chrono::Utc::now().timestamp();
-        const SESSION_WINDOW_SECS: i64 = 5 * 60 * 60; // 5h
-        const WEEKLY_WINDOW_SECS: i64 = 7 * 24 * 60 * 60; // 7d
-
-        let tracked = |flag: Option<bool>| flag == Some(true);
-        let unknown = |flag: Option<bool>| flag.is_none();
-        let due = |ts: Option<i64>| ts.map(|t| now >= t).unwrap_or(false);
-
-        let session_tracked = tracked(cookie.session_has_reset);
-        let weekly_tracked = tracked(cookie.weekly_has_reset);
-        let sonnet_tracked = tracked(cookie.weekly_sonnet_has_reset);
-
-        let session_due = session_tracked && due(cookie.session_resets_at);
-        let weekly_due = weekly_tracked && due(cookie.weekly_resets_at);
-        let sonnet_due = sonnet_tracked && due(cookie.weekly_sonnet_resets_at);
-
-        let need_probe_unknown = unknown(cookie.session_has_reset)
-            || unknown(cookie.weekly_has_reset)
-            || unknown(cookie.weekly_sonnet_has_reset);
-        let any_due = session_due || weekly_due || sonnet_due;
-
-        if !(need_probe_unknown || any_due) {
-            return;
-        }
-
-        cookie.resets_last_checked_at = Some(now);
-        if let Some((sess, week, sonnet)) = Self::fetch_usage_resets(cookie, handle).await {
-            // Unknown -> decide track/not-track
-            if unknown(cookie.session_has_reset) {
-                cookie.session_has_reset = Some(sess.is_some());
-            }
-            if unknown(cookie.weekly_has_reset) {
-                cookie.weekly_has_reset = Some(week.is_some());
-            }
-            if unknown(cookie.weekly_sonnet_has_reset) {
-                cookie.weekly_sonnet_has_reset = Some(sonnet.is_some());
-            }
-
-            // Handle due tracked windows: reset usage then update boundaries if provided
-            if session_due {
-                cookie.session_usage = crate::config::UsageBreakdown::default();
-            }
-            if weekly_due {
-                cookie.weekly_usage = crate::config::UsageBreakdown::default();
-            }
-            if sonnet_due {
-                cookie.weekly_sonnet_usage = crate::config::UsageBreakdown::default();
-            }
-
-            // Update/reset boundaries for tracked windows
-            if cookie.session_has_reset == Some(true) {
-                if let Some(ts) = sess {
-                    cookie.session_resets_at = Some(ts);
-                } else {
-                    // Server indicates no boundary -> stop tracking and clear ts
-                    cookie.session_has_reset = Some(false);
-                    cookie.session_resets_at = None;
-                }
-            }
-            if cookie.weekly_has_reset == Some(true) {
-                if let Some(ts) = week {
-                    cookie.weekly_resets_at = Some(ts);
-                } else {
-                    cookie.weekly_has_reset = Some(false);
-                    cookie.weekly_resets_at = None;
-                }
-            }
-            if cookie.weekly_sonnet_has_reset == Some(true) {
-                if let Some(ts) = sonnet {
-                    cookie.weekly_sonnet_resets_at = Some(ts);
-                } else {
-                    cookie.weekly_sonnet_has_reset = Some(false);
-                    cookie.weekly_sonnet_resets_at = None;
-                }
-            }
-        } else {
-            // Network/parse failure: apply fallback only for windows we currently track
-            if session_due && session_tracked {
-                cookie.session_usage = crate::config::UsageBreakdown::default();
-                cookie.session_resets_at = Some(now + SESSION_WINDOW_SECS);
-            }
-            if weekly_due && weekly_tracked {
-                cookie.weekly_usage = crate::config::UsageBreakdown::default();
-                cookie.weekly_resets_at = Some(now + WEEKLY_WINDOW_SECS);
-            }
-            if sonnet_due && sonnet_tracked {
-                cookie.weekly_sonnet_usage = crate::config::UsageBreakdown::default();
-                cookie.weekly_sonnet_resets_at = Some(now + WEEKLY_WINDOW_SECS);
-            }
-        }
-    }
-
-    async fn fetch_usage_resets(
-        cookie: &mut crate::config::CookieStatus,
-        handle: &CookieActorHandle,
-    ) -> Option<(Option<i64>, Option<i64>, Option<i64>)> {
-        let mut state = ClaudeCodeState::from_cookie(handle.clone(), cookie.clone()).ok()?;
-        let usage = state.fetch_usage_metrics().await.ok()?;
-        state.return_cookie(None).await;
-        if let Some(updated) = state.cookie.clone() {
-            *cookie = updated;
-        }
-
-        let parse_reset = |obj_key: &str| -> Option<i64> {
-            usage
-                .get(obj_key)
-                .and_then(|o| o.get("resets_at"))
-                .and_then(|v| v.as_str())
-                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-                .map(|dt| dt.timestamp())
-        };
-
-        Some((
-            parse_reset("five_hour"),
-            parse_reset("seven_day"),
-            parse_reset("seven_day_sonnet"),
-        ))
     }
 
     fn local_count_tokens_response(body: &CreateMessageParams) -> axum::response::Response {

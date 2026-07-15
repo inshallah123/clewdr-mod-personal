@@ -143,6 +143,7 @@
         "preserveChats": "Preserve Chats",
         "webSearch": "Web Search",
         "webCountTokens": "Enable web count_tokens",
+        "fableFallback": "Let Opus 4.8 take over when Fable is exhausted",
         "sanitizeMessages": "Sanitize messages (trim whitespace)"
       },
       "cookie": {

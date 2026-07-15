@@ -13,6 +13,8 @@ pub struct CookieStatusApi {
     #[serde(default)]
     pub reset_time: Option<i64>,
     #[serde(default)]
+    pub fable_reset_time: Option<i64>,
+    #[serde(default)]
     pub count_tokens_allowed: Option<bool>,
     #[serde(default)]
     pub session_usage: UsageBreakdown,

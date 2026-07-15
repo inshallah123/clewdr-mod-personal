@@ -17,6 +17,8 @@ pub enum Reason {
     Restricted(i64),
     #[cfg_attr(feature = "display", error("429 Too many request: until {}", format_timestamp(*.0)))]
     TooManyRequest(i64),
+    #[cfg_attr(feature = "display", error("Fable quota exhausted: until {}", format_timestamp(*.0)))]
+    FableRateLimited(i64),
 }
 
 #[cfg(feature = "display")]

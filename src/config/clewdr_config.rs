@@ -95,6 +95,10 @@ pub struct ClewdrConfig {
     pub web_search: bool,
     #[serde(default)]
     pub enable_web_count_tokens: bool,
+    /// After every available cookie reaches the Fable-scoped weekly limit,
+    /// allow Anthropic to fall back to Opus 4.8 for Fable requests.
+    #[serde(default)]
+    pub enable_fable_fallback: bool,
     #[serde(default)]
     pub sanitize_messages: bool,
 
@@ -155,6 +159,7 @@ impl Default for ClewdrConfig {
             preserve_chats: false,
             web_search: false,
             enable_web_count_tokens: false,
+            enable_fable_fallback: false,
             sanitize_messages: false,
             skip_first_warning: false,
             skip_second_warning: false,
@@ -225,6 +230,11 @@ impl Display for ClewdrConfig {
             "Web count_tokens: {}",
             enabled(self.enable_web_count_tokens)
         )?;
+        writeln!(
+            f,
+            "Fable -> Opus 4.8 fallback: {}",
+            enabled(self.enable_fable_fallback)
+        )?;
         Ok(())
     }
 }
@@ -244,6 +254,7 @@ impl From<&ClewdrConfig> for clewdr_types::ConfigApi {
             preserve_chats: c.preserve_chats,
             web_search: c.web_search,
             enable_web_count_tokens: c.enable_web_count_tokens,
+            enable_fable_fallback: c.enable_fable_fallback,
             sanitize_messages: c.sanitize_messages,
             skip_first_warning: c.skip_first_warning,
             skip_second_warning: c.skip_second_warning,
@@ -276,6 +287,7 @@ impl From<clewdr_types::ConfigApi> for ClewdrConfig {
             preserve_chats: c.preserve_chats,
             web_search: c.web_search,
             enable_web_count_tokens: c.enable_web_count_tokens,
+            enable_fable_fallback: c.enable_fable_fallback,
             sanitize_messages: c.sanitize_messages,
             skip_first_warning: c.skip_first_warning,
             skip_second_warning: c.skip_second_warning,
