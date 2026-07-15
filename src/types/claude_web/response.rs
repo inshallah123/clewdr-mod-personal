@@ -133,16 +133,7 @@ impl ClaudeWebState {
                         let family = last_params
                             .as_ref()
                             .map(|p| p.model.as_str())
-                            .map(|m| {
-                                let m = m.to_ascii_lowercase();
-                                if m.contains("opus") {
-                                    crate::config::ModelFamily::Opus
-                                } else if m.contains("sonnet") {
-                                    crate::config::ModelFamily::Sonnet
-                                } else {
-                                    crate::config::ModelFamily::Other
-                                }
-                            })
+                            .map(crate::config::ModelFamily::classify)
                             .unwrap_or(crate::config::ModelFamily::Other);
                         c.add_and_bucket_usage(input_tokens, out, family);
                         let _ = handle.return_cookie(c, None).await;
@@ -152,16 +143,7 @@ impl ClaudeWebState {
                     let family = last_params
                         .as_ref()
                         .map(|p| p.model.as_str())
-                        .map(|m| {
-                            let m = m.to_ascii_lowercase();
-                            if m.contains("opus") {
-                                crate::config::ModelFamily::Opus
-                            } else if m.contains("sonnet") {
-                                crate::config::ModelFamily::Sonnet
-                            } else {
-                                crate::config::ModelFamily::Other
-                            }
-                        })
+                        .map(crate::config::ModelFamily::classify)
                         .unwrap_or(crate::config::ModelFamily::Other);
                     c.add_and_bucket_usage(input_tokens, 0, family);
                     let _ = handle.return_cookie(c, None).await;

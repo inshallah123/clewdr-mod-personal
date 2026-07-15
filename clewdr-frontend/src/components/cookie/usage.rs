@@ -13,11 +13,6 @@ pub fn UsageDetails(cookie: CookieStatus) -> impl IntoView {
     let groups: Vec<(String, UsageBreakdown)> = [
         ("cookieStatus.quota.session", &cookie.session_usage),
         ("cookieStatus.quota.sevenDay", &cookie.weekly_usage),
-        (
-            "cookieStatus.quota.sevenDaySonnet",
-            &cookie.weekly_sonnet_usage,
-        ),
-        ("cookieStatus.quota.sevenDayOpus", &cookie.weekly_opus_usage),
         ("cookieStatus.quota.total", &cookie.lifetime_usage),
     ]
     .into_iter()
@@ -37,9 +32,9 @@ pub fn UsageDetails(cookie: CookieStatus) -> impl IntoView {
             "cookieStatus.quota.sevenDay",
         ),
         (
-            cookie.seven_day_sonnet_utilization,
-            cookie.seven_day_sonnet_resets_at.as_deref(),
-            "cookieStatus.quota.sevenDaySonnet",
+            cookie.seven_day_fable_utilization,
+            cookie.seven_day_fable_resets_at.as_deref(),
+            "cookieStatus.quota.sevenDayFable",
         ),
     ]
     .into_iter()

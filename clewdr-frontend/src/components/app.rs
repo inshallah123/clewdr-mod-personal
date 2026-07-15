@@ -56,7 +56,7 @@ pub fn App() -> impl IntoView {
 
     // Init theme from localStorage
     {
-        let theme = storage::get("theme").unwrap_or_else(|| "dark".into());
+        let theme = storage::get("theme").unwrap_or_else(|| "light".into());
         if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
             let _ = doc
                 .document_element()
@@ -89,7 +89,7 @@ pub fn App() -> impl IntoView {
                 <div class="container row-btw">
                     <div class="row">
                         <h1>"ClewdR"</h1>
-                        <span class="text-xs text-mute" style="white-space:pre-line">{move || version.get()}</span>
+                        <span class="version-info">{move || version.get()}</span>
                     </div>
                     <div class="row-sm">
                         <ThemeToggle />
@@ -189,7 +189,7 @@ fn LogoutPanel(is_authenticated: RwSignal<bool>) -> impl IntoView {
 
 #[component]
 fn ThemeToggle() -> impl IntoView {
-    let is_dark = RwSignal::new(storage::get("theme").as_deref() != Some("light"));
+    let is_dark = RwSignal::new(storage::get("theme").as_deref() == Some("dark"));
 
     let toggle = move |_| {
         let dark = !is_dark.get_untracked();
@@ -206,7 +206,7 @@ fn ThemeToggle() -> impl IntoView {
 
     view! {
         <button
-            class="lang-btn off"
+            class="theme-btn"
             title=move || if is_dark.get() { "Switch to light" } else { "Switch to dark" }
             on:click=toggle
         >

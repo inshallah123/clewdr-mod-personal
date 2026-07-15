@@ -95,8 +95,7 @@
     "quota": {
       "session": "Session utilization",
       "sevenDay": "7-day utilization",
-      "sevenDaySonnet": "7-day Sonnet utilization",
-      "sevenDayOpus": "7-day Opus utilization",
+      "sevenDayFable": "7-day Fable utilization",
       "total": "Total usage",
       "resetsAt": "Resets at"
     },

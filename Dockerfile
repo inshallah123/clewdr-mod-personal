@@ -20,6 +20,7 @@ RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS backend-builder
 ARG TARGETARCH
+ARG CLEWDR_COMPRESS=true
 
 # Install build dependencies + musl toolchain
 RUN apt-get update && apt-get install -y \
@@ -58,7 +59,7 @@ RUN RUST_TARGET=$(cat /tmp/rust-target) && \
     cargo build --release --target "$RUST_TARGET" \
     --no-default-features --features embed-resource,xdg --bin clewdr \
     && cp ./target/"$RUST_TARGET"/release/clewdr /build/clewdr \
-    && upx --best --lzma /build/clewdr \
+    && if [ "$CLEWDR_COMPRESS" = "true" ]; then upx --best --lzma /build/clewdr; fi \
     && mkdir -p /etc/clewdr/log \
     && touch /etc/clewdr/clewdr.toml
 

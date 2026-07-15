@@ -13,18 +13,9 @@ use snafu::{GenerateImplicitData, Location};
 use tracing::info;
 
 use crate::{
-    config::{PLACEHOLDER_COOKIE, TokenInfo},
+    config::{ModelFamily, PLACEHOLDER_COOKIE, TokenInfo},
     error::ClewdrError,
 };
-
-/// Model family for usage bucketing
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum ModelFamily {
-    Sonnet,
-    Opus,
-    Other,
-}
 
 /// A struct representing a cookie
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

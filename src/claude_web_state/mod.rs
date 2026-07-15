@@ -150,14 +150,7 @@ impl ClaudeWebState {
     }
 
     fn classify_model(model: &str) -> crate::config::ModelFamily {
-        let m = model.to_ascii_lowercase();
-        if m.contains("opus") {
-            crate::config::ModelFamily::Opus
-        } else if m.contains("sonnet") {
-            crate::config::ModelFamily::Sonnet
-        } else {
-            crate::config::ModelFamily::Other
-        }
+        crate::config::ModelFamily::classify(model)
     }
 
     pub async fn persist_usage_totals(&mut self, input: u64, output: u64) {

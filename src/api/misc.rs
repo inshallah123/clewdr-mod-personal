@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 use tracing::{error, info, warn};
 use wreq::StatusCode;
 
-use super::error::ApiError;
+use super::{error::ApiError, usage::extract_usage_fields};
 use crate::{
     VERSION_INFO,
     claude_code_state::ClaudeCodeState,
@@ -300,22 +300,29 @@ async fn augment_utilization(cookies: Vec<CookieStatus>, handle: CookieActorHand
         let handle = handle.clone();
         async move {
             let base = serde_json::to_value(&cookie).unwrap_or(json!({}));
-            match fetch_usage_percent(cookie, handle).await {
-                Some((
-                    five_hour,
-                    five_reset,
-                    seven_day,
-                    seven_reset,
-                    seven_day_sonnet,
-                    sonnet_reset,
-                )) => {
+            match fetch_usage_fields(cookie, handle).await {
+                Some(usage) => {
                     let mut obj = base;
-                    obj["session_utilization"] = json!(five_hour);
-                    obj["session_resets_at"] = json!(five_reset);
-                    obj["seven_day_utilization"] = json!(seven_day);
-                    obj["seven_day_resets_at"] = json!(seven_reset);
-                    obj["seven_day_sonnet_utilization"] = json!(seven_day_sonnet);
-                    obj["seven_day_sonnet_resets_at"] = json!(sonnet_reset);
+                    obj["session_utilization"] = json!(usage.five_hour.utilization);
+                    obj["session_resets_at"] = json!(usage.five_hour.resets_at);
+                    obj["seven_day_utilization"] = json!(usage.seven_day.utilization);
+                    obj["seven_day_resets_at"] = json!(usage.seven_day.resets_at);
+                    obj["seven_day_sonnet_utilization"] = json!(
+                        usage
+                            .seven_day_sonnet
+                            .as_ref()
+                            .map(|metric| metric.utilization)
+                    );
+                    obj["seven_day_sonnet_resets_at"] =
+                        json!(usage.seven_day_sonnet.and_then(|metric| metric.resets_at));
+                    obj["seven_day_fable_utilization"] = json!(
+                        usage
+                            .seven_day_fable
+                            .as_ref()
+                            .map(|metric| metric.utilization)
+                    );
+                    obj["seven_day_fable_resets_at"] =
+                        json!(usage.seven_day_fable.and_then(|metric| metric.resets_at));
                     obj
                 }
                 None => base,
@@ -327,17 +334,10 @@ async fn augment_utilization(cookies: Vec<CookieStatus>, handle: CookieActorHand
     .await
 }
 
-async fn fetch_usage_percent(
+async fn fetch_usage_fields(
     cookie: CookieStatus,
     handle: CookieActorHandle,
-) -> Option<(
-    u32,
-    Option<String>,
-    u32,
-    Option<String>,
-    u32,
-    Option<String>,
-)> {
+) -> Option<super::usage::UsageFields> {
     let oauth_handle = handle.clone();
     let fallback_cookie = cookie.clone();
     let fallback_cookie_name = fallback_cookie.cookie.to_string();
@@ -378,57 +378,4 @@ async fn try_oauth_usage(
             warn!("try_oauth_usage: fetch failed for {}: {}", cookie.cookie, e);
         })
         .map_err(|_| ())
-}
-
-type Usage = Option<(
-    u32,
-    Option<String>,
-    u32,
-    Option<String>,
-    u32,
-    Option<String>,
-)>;
-/// Extract the six usage fields from the usage JSON returned by either endpoint
-fn extract_usage_fields(usage: &serde_json::Value) -> Usage {
-    let five = usage
-        .get("five_hour")
-        .and_then(|o| o.get("utilization"))
-        .and_then(|v| v.as_f64())
-        .map(|v| v.round() as u32)
-        .unwrap_or(0);
-    let five_reset = usage
-        .get("five_hour")
-        .and_then(|o| o.get("resets_at"))
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    let seven = usage
-        .get("seven_day")
-        .and_then(|o| o.get("utilization"))
-        .and_then(|v| v.as_f64())
-        .map(|v| v.round() as u32)
-        .unwrap_or(0);
-    let seven_reset = usage
-        .get("seven_day")
-        .and_then(|o| o.get("resets_at"))
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    let seven_sonnet = usage
-        .get("seven_day_sonnet")
-        .and_then(|o| o.get("utilization"))
-        .and_then(|v| v.as_f64())
-        .map(|v| v.round() as u32)
-        .unwrap_or(0);
-    let sonnet_reset = usage
-        .get("seven_day_sonnet")
-        .and_then(|o| o.get("resets_at"))
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    Some((
-        five,
-        five_reset,
-        seven,
-        seven_reset,
-        seven_sonnet,
-        sonnet_reset,
-    ))
 }

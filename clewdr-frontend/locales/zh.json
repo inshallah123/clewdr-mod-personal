@@ -95,8 +95,7 @@
     "quota": {
       "session": "会话配额使用",
       "sevenDay": "7日配额使用",
-      "sevenDaySonnet": "7日 Sonnet 配额使用",
-      "sevenDayOpus": "7日Opus配额使用",
+      "sevenDayFable": "7日 Fable 使用",
       "total": "累计用量",
       "resetsAt": "重置于"
     },

@@ -495,14 +495,7 @@ impl ClaudeCodeState {
     }
 
     fn classify_model(model: &str) -> ModelFamily {
-        let m = model.to_ascii_lowercase();
-        if m.contains("opus") {
-            ModelFamily::Opus
-        } else if m.contains("sonnet") {
-            ModelFamily::Sonnet
-        } else {
-            ModelFamily::Other
-        }
+        ModelFamily::classify(model)
     }
 
     // ---------------------------------------------

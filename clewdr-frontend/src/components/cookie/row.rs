@@ -56,8 +56,8 @@ pub fn ValidRow(cookie: CookieStatus) -> impl IntoView {
             <div class="flex-1">
                 <div class="row-sm">
                     <span
-                        class="text-mono text-xs"
-                        style="color:#4ade80; cursor:pointer"
+                        class="text-mono text-xs cookie-token-valid"
+                        style="cursor:pointer"
                         on:click=move |_| expanded.update(|e| *e = !*e)
                     >
                         {move || if expanded.get() { cookie_str.get_value() } else { masked.clone() }}
@@ -112,7 +112,7 @@ pub fn ExhaustedRow(cookie: CookieStatus) -> impl IntoView {
 
     view! {
         <div class="cookie-row">
-            <span class="text-mono text-xs truncate flex-1" style="color:#facc15">{masked}</span>
+            <span class="text-mono text-xs truncate flex-1 cookie-token-exhausted">{masked}</span>
             <div class="row-sm">
                 <span class="text-xs text-dim">{cooldown}</span>
                 <DeleteBtn cookie=cookie.cookie />
@@ -128,7 +128,7 @@ pub fn InvalidRow(cookie: UselessCookie) -> impl IntoView {
 
     view! {
         <div class="cookie-row">
-            <span class="text-mono text-xs truncate flex-1" style="color:#f87171">{masked}</span>
+            <span class="text-mono text-xs truncate flex-1 cookie-token-invalid">{masked}</span>
             <div class="row-sm">
                 <span class="text-xs text-dim">{reason}</span>
                 <DeleteBtn cookie=cookie.cookie />

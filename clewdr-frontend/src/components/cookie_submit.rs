@@ -158,7 +158,11 @@ pub fn CookieSubmitForm() -> impl IntoView {
                             } else {
                                 "background:rgba(239,68,68,0.05)"
                             };
-                            let color = if result.success { "color:#4ade80" } else { "color:#f87171" };
+                            let color = if result.success {
+                                "color:var(--success)"
+                            } else {
+                                "color:var(--danger)"
+                            };
                             let icon = if result.success { "✓" } else { "✗" };
                             let short = utils::mask_str(&result.cookie, 15);
                             view! {
