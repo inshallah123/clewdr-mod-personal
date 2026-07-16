@@ -137,8 +137,13 @@ impl ClaudeCodeState {
         let response = self
             .execute_claude_request(&access_token, &p, enable_fable_fallback)
             .await?;
-        self.handle_success_response(response, model_family, enable_fable_fallback, p.model.clone())
-            .await
+        self.handle_success_response(
+            response,
+            model_family,
+            enable_fable_fallback,
+            p.model.clone(),
+        )
+        .await
     }
 
     async fn execute_claude_request(

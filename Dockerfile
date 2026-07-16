@@ -1,4 +1,4 @@
-FROM docker.io/lukemathwalker/cargo-chef:latest-rust-trixie AS frontend-builder
+FROM docker.io/lukemathwalker/cargo-chef:latest-rust-trixie@sha256:978393666bb054d0cb135a39b36cbdac82b5c0fb5553942e0ae7b0aa631f0e54 AS frontend-builder
 WORKDIR /build
 RUN rustup target add wasm32-unknown-unknown && \
     curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
@@ -11,7 +11,7 @@ COPY .cargo/ .cargo/
 RUN cargo binstall trunk --no-confirm && \
     cd clewdr-frontend && trunk build --release
 
-FROM docker.io/lukemathwalker/cargo-chef:latest-rust-trixie AS chef
+FROM docker.io/lukemathwalker/cargo-chef:latest-rust-trixie@sha256:978393666bb054d0cb135a39b36cbdac82b5c0fb5553942e0ae7b0aa631f0e54 AS chef
 WORKDIR /build
 
 FROM chef AS planner
@@ -63,7 +63,7 @@ RUN RUST_TARGET=$(cat /tmp/rust-target) && \
     && mkdir -p /etc/clewdr/log \
     && touch /etc/clewdr/clewdr.toml
 
-FROM gcr.io/distroless/static-debian13
+FROM gcr.io/distroless/static-debian13@sha256:9197324ba51d9cd071af8505989365c006adf9d6d2067eada25aef00abbb5278
 COPY --from=backend-builder /build/clewdr /usr/local/bin/clewdr
 COPY --from=backend-builder /etc/clewdr /etc/clewdr
 ENV CLEWDR_IP=0.0.0.0

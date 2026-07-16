@@ -9,10 +9,7 @@ use clewdr_types::{
 };
 use serde::Deserialize;
 
-use crate::services::{
-    pricing,
-    usage_tracker::usage_tracker,
-};
+use crate::services::{pricing, usage_tracker::usage_tracker};
 
 /// Resolve pricing with a small per-request memo.
 struct PricingMemo(HashMap<String, (ModelPricing, &'static str)>);
@@ -67,9 +64,11 @@ pub async fn api_usage_summary() -> Json<UsageSummaryApi> {
             });
         }
         // biggest spenders first
-        summary
-            .models
-            .sort_by(|a, b| b.cost.partial_cmp(&a.cost).unwrap_or(std::cmp::Ordering::Equal));
+        summary.models.sort_by(|a, b| {
+            b.cost
+                .partial_cmp(&a.cost)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         out.total_cost += summary.total_cost;
         out.cookies.push(summary);
     }

@@ -96,9 +96,11 @@ impl From<CreateMessageParams> for ClaudeCreateMessageParams {
             context_management: None,
             mcp_servers: None,
             stop_sequences: params.stop,
-            thinking: params
-                .thinking
-                .or_else(|| params.reasoning_effort.map(|e| Thinking::new(e.budget_tokens()))),
+            thinking: params.thinking.or_else(|| {
+                params
+                    .reasoning_effort
+                    .map(|e| Thinking::new(e.budget_tokens()))
+            }),
             temperature: params.temperature,
             stream: params.stream,
             top_k: params.top_k,

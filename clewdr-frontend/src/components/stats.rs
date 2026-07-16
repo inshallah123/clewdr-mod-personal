@@ -8,7 +8,9 @@ use crate::{
     api,
     i18n::use_i18n,
     types::{TokenUsage, UsageSeriesApi},
-    utils::{format_cost, format_day_short, format_hour_short, format_tokens, mask_str, model_label},
+    utils::{
+        format_cost, format_day_short, format_hour_short, format_tokens, mask_str, model_label,
+    },
 };
 
 const PALETTE: [&str; 8] = [
@@ -207,7 +209,7 @@ pub fn StatsTab() -> impl IntoView {
                     let est = usage.estimated_requests > 0;
                     view! {
                         <tr>
-                            <td>{label}{est.then(|| " ≈")}</td>
+                            <td>{label}{est.then_some(" ≈")}</td>
                             <td>{usage.requests.to_string()}</td>
                             <td>{format_tokens(usage.input)}</td>
                             <td>{format_tokens(usage.output)}</td>

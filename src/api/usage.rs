@@ -1,4 +1,4 @@
-use serde_json::Value;
+use serde_json::{Value, json};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct UsageMetric {
@@ -12,6 +12,62 @@ pub(crate) struct UsageFields {
     pub seven_day: UsageMetric,
     pub seven_day_sonnet: Option<UsageMetric>,
     pub seven_day_fable: Option<UsageMetric>,
+}
+
+pub(crate) fn merge_usage_fields(mut base: Value, usage: Option<UsageFields>) -> Value {
+    if let Some(obj) = base.as_object_mut() {
+        for internal_field in [
+            "weekly_resets_at",
+            "weekly_sonnet_resets_at",
+            "weekly_opus_resets_at",
+            "resets_last_checked_at",
+            "session_has_reset",
+            "weekly_has_reset",
+            "weekly_sonnet_has_reset",
+            "weekly_opus_has_reset",
+        ] {
+            obj.remove(internal_field);
+        }
+    }
+
+    base["session_utilization"] = json!(usage.as_ref().map(|fields| fields.five_hour.utilization));
+    base["session_resets_at"] = json!(
+        usage
+            .as_ref()
+            .and_then(|fields| fields.five_hour.resets_at.clone())
+    );
+    base["seven_day_utilization"] =
+        json!(usage.as_ref().map(|fields| fields.seven_day.utilization));
+    base["seven_day_resets_at"] = json!(
+        usage
+            .as_ref()
+            .and_then(|fields| fields.seven_day.resets_at.clone())
+    );
+    base["seven_day_sonnet_utilization"] = json!(
+        usage
+            .as_ref()
+            .and_then(|fields| fields.seven_day_sonnet.as_ref())
+            .map(|metric| metric.utilization)
+    );
+    base["seven_day_sonnet_resets_at"] = json!(
+        usage
+            .as_ref()
+            .and_then(|fields| fields.seven_day_sonnet.as_ref())
+            .and_then(|metric| metric.resets_at.clone())
+    );
+    base["seven_day_fable_utilization"] = json!(
+        usage
+            .as_ref()
+            .and_then(|fields| fields.seven_day_fable.as_ref())
+            .map(|metric| metric.utilization)
+    );
+    base["seven_day_fable_resets_at"] = json!(
+        usage
+            .as_ref()
+            .and_then(|fields| fields.seven_day_fable.as_ref())
+            .and_then(|metric| metric.resets_at.clone())
+    );
+    base
 }
 
 pub(crate) fn extract_usage_fields(usage: &Value) -> Option<UsageFields> {
@@ -94,7 +150,26 @@ fn is_fable_label(label: &str) -> bool {
 mod tests {
     use serde_json::json;
 
-    use super::extract_usage_fields;
+    use super::{extract_usage_fields, merge_usage_fields};
+
+    #[test]
+    fn failed_usage_fetch_never_leaks_integer_reset_fields() {
+        let value = merge_usage_fields(
+            json!({
+                "cookie": "redacted",
+                "session_resets_at": 1_784_179_799_i64,
+                "weekly_resets_at": 1_784_179_799_i64,
+                "session_has_reset": true
+            }),
+            None,
+        );
+
+        assert!(value["session_utilization"].is_null());
+        assert!(value["session_resets_at"].is_null());
+        assert!(value["seven_day_resets_at"].is_null());
+        assert!(value.get("weekly_resets_at").is_none());
+        assert!(value.get("session_has_reset").is_none());
+    }
 
     #[test]
     fn extracts_fable_scoped_window_from_live_usage_shape() {

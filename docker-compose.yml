@@ -1,11 +1,17 @@
 # clewdr 魔改版 —— 独立部署，与 F:/docker/gproxy 的 clewdr(8484) 完全隔离
 # - clewdr-mod 仅挂 internal 网络(gproxy_app_internal)：结构上无直连外网，
-#   所有出站流量只能经 nat-socks:8118（与原版 clewdr 同等严格）
+#   所有出站流量只能经 nat-socks:8118，代理不可用时直接断网
 # - 端口发布由 ingress sidecar(socat 纯转发) 完成：127.0.0.1:8485 -> clewdr-mod:8484
-# - 数据/配置: ./deploy/data/clewdr.toml（独立密码与 cookie，已 gitignore）
+# - 数据/配置由 .env 的 CLEWDR_MOD_DATA_DIR 指定（独立密码与 cookie）
 # - 日常开发: 改完代码执行  docker compose up -d --build
 
 name: clewdr-mod
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
 
 services:
   clewdr-mod:
@@ -18,16 +24,20 @@ services:
     restart: unless-stopped
     environment:
       TZ: "Asia/Shanghai"
+      CLEWDR_PROXY: "http://nat-socks:8118"
+      CLEWDR_CHECK_UPDATE: "false"
+      CLEWDR_AUTO_UPDATE: "false"
     volumes:
-      - ./deploy/data:/etc/clewdr
+      - "${CLEWDR_MOD_DATA_DIR:-./deploy/data}:/etc/clewdr"
     networks:
       - gproxy_net   # 仅 internal 网络：出站只能走 nat-socks:8118
     labels:
       com.centurylinklabs.watchtower.enable: "false"
+    logging: *default-logging
 
   # 纯端口转发 sidecar：自身不发起任何业务流量
   ingress:
-    image: alpine/socat:latest
+    image: alpine/socat@sha256:d85531a29ef5ba99dfb4717485c239307e2902d522a1bc010992a2728c92cfad
     container_name: clewdr-mod-ingress
     restart: unless-stopped
     command: TCP-LISTEN:8485,fork,reuseaddr TCP:clewdr-mod:8484
@@ -35,11 +45,23 @@ services:
       - clewdr-mod
     ports:
       - "127.0.0.1:8485:8485"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider --timeout=5 http://clewdr-mod:8484/api/version || { echo 'clewdr-mod backend health check failed' >&2; exit 1; }"]
+      interval: 1m
+      timeout: 8s
+      retries: 3
+      start_period: 20s
     networks:
       - gproxy_net   # 内网侧：转发给 clewdr-mod
       - default      # 外网侧：仅用于向宿主机 127.0.0.1 发布端口
     labels:
       com.centurylinklabs.watchtower.enable: "false"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging: *default-logging
 
 networks:
   gproxy_net:

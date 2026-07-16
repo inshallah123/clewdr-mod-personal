@@ -100,11 +100,7 @@ pub fn format_cost(v: f64) -> String {
 /// epoch secs -> "MM-DD" (UTC)
 pub fn format_day_short(ts: i64) -> String {
     let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64((ts * 1000) as f64));
-    format!(
-        "{:02}-{:02}",
-        date.get_utc_month() + 1,
-        date.get_utc_date()
-    )
+    format!("{:02}-{:02}", date.get_utc_month() + 1, date.get_utc_date())
 }
 
 /// epoch secs -> "DD HH:00" (local time)

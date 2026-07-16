@@ -246,7 +246,10 @@ async fn fetch_catalog() -> Result<usize, String> {
             input: input * 1e6,
             output: output * 1e6,
             cache_read: entry.cache_read_input_token_cost.unwrap_or(input * 0.1) * 1e6,
-            cache_write: entry.cache_creation_input_token_cost.unwrap_or(input * 1.25) * 1e6,
+            cache_write: entry
+                .cache_creation_input_token_cost
+                .unwrap_or(input * 1.25)
+                * 1e6,
         };
         // prefer non-prefixed (exact anthropic) entries over provider variants
         models.entry(name).or_insert(pricing);

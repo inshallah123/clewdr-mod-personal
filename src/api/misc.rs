@@ -15,7 +15,10 @@ use serde_json::{Value, json};
 use tracing::{error, info, warn};
 use wreq::StatusCode;
 
-use super::{error::ApiError, usage::extract_usage_fields};
+use super::{
+    error::ApiError,
+    usage::{extract_usage_fields, merge_usage_fields},
+};
 use crate::{
     VERSION_INFO,
     claude_code_state::ClaudeCodeState,
@@ -301,33 +304,8 @@ async fn augment_utilization(cookies: Vec<CookieStatus>, handle: CookieActorHand
         let handle = handle.clone();
         async move {
             let base = serde_json::to_value(&cookie).unwrap_or(json!({}));
-            match fetch_usage_fields(cookie, handle).await {
-                Some(usage) => {
-                    let mut obj = base;
-                    obj["session_utilization"] = json!(usage.five_hour.utilization);
-                    obj["session_resets_at"] = json!(usage.five_hour.resets_at);
-                    obj["seven_day_utilization"] = json!(usage.seven_day.utilization);
-                    obj["seven_day_resets_at"] = json!(usage.seven_day.resets_at);
-                    obj["seven_day_sonnet_utilization"] = json!(
-                        usage
-                            .seven_day_sonnet
-                            .as_ref()
-                            .map(|metric| metric.utilization)
-                    );
-                    obj["seven_day_sonnet_resets_at"] =
-                        json!(usage.seven_day_sonnet.and_then(|metric| metric.resets_at));
-                    obj["seven_day_fable_utilization"] = json!(
-                        usage
-                            .seven_day_fable
-                            .as_ref()
-                            .map(|metric| metric.utilization)
-                    );
-                    obj["seven_day_fable_resets_at"] =
-                        json!(usage.seven_day_fable.and_then(|metric| metric.resets_at));
-                    obj
-                }
-                None => base,
-            }
+            let usage = fetch_usage_fields(cookie, handle).await;
+            merge_usage_fields(base, usage)
         }
     }))
     .buffer_unordered(concurrency)
