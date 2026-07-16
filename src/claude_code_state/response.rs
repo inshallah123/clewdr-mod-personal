@@ -21,7 +21,9 @@ use crate::{
 
 use super::{
     ClaudeCodeState,
-    fable_fallback::{FALLBACK_NOTICE, prepend_notice_to_response, shift_content_block_index},
+    fable_fallback::{
+        FALLBACK_NOTICE, is_fable_model, prepend_notice_to_response, shift_content_block_index,
+    },
 };
 
 /// Full usage extracted from an Anthropic messages response.
@@ -61,6 +63,13 @@ impl ClaudeCodeState {
         }
         let (response, usage) =
             Self::materialize_non_stream_response(response, show_fallback_notice).await?;
+        // Prefer the family of the model that actually served the request; in
+        // server-side fallback mode the upstream may still answer with Fable.
+        let model_family = usage
+            .as_ref()
+            .and_then(|u| u.model.as_deref())
+            .map(ModelFamily::classify)
+            .unwrap_or(model_family);
         let (input, output) = usage
             .as_ref()
             .map(|u| (u.input, u.output))
@@ -154,6 +163,10 @@ impl ClaudeCodeState {
                         StreamEvent::MessageStop => {
                             let total_out = osum.load(Ordering::Relaxed);
                             let input_tokens = real_input.unwrap_or(input_estimate);
+                            let family = seen_model
+                                .as_deref()
+                                .map(ModelFamily::classify)
+                                .unwrap_or(family);
                             // Record detailed usage for cost statistics
                             if let Some(key) = cookie_key.clone() {
                                 usage_tracker().record(UsageRecord {
@@ -193,7 +206,13 @@ impl ClaudeCodeState {
                 };
                 yield Ok::<SseEvent, std::io::Error>(mirrored.data(data));
 
-                if show_fallback_notice && !notice_injected && is_message_start {
+                // Only announce the Opus takeover when the upstream actually
+                // fell back (i.e. the serving model is not Fable itself).
+                let fallback_happened = seen_model
+                    .as_deref()
+                    .map(|model| !is_fable_model(model))
+                    .unwrap_or(true);
+                if show_fallback_notice && !notice_injected && is_message_start && fallback_happened {
                     yield Ok::<SseEvent, std::io::Error>(SseEvent::default().event("content_block_start").data(
                         serde_json::json!({
                             "type": "content_block_start",
@@ -230,13 +249,24 @@ impl ClaudeCodeState {
             msg: "Failed to read Claude response body",
         })?;
         let usage = Self::extract_usage_from_bytes(&bytes);
-        let body = if show_fallback_notice {
+        // Skip the notice when the upstream still answered with Fable itself.
+        let fallback_happened = usage
+            .as_ref()
+            .and_then(|u| u.model.as_deref())
+            .map(|model| !is_fable_model(model))
+            .unwrap_or(true);
+        let body = if show_fallback_notice && fallback_happened {
             prepend_notice_to_response(&bytes).unwrap_or_else(|| bytes.to_vec())
         } else {
             bytes.to_vec()
         };
         let mut builder = http::Response::builder().status(status);
         for (key, value) in headers.iter() {
+            // The body may have been re-materialized (and possibly grown by the
+            // fallback notice); stale framing headers would truncate the reply.
+            if key == http::header::CONTENT_LENGTH || key == http::header::TRANSFER_ENCODING {
+                continue;
+            }
             builder = builder.header(key, value);
         }
         let response = builder

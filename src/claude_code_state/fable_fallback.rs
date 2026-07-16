@@ -50,19 +50,23 @@ fn fallback_model_for(model: &str) -> Option<String> {
     (leaf == FABLE_5).then(|| format!("{namespace}/{OPUS_48}"))
 }
 
-fn confirmed_fable_reset(usage: &Value, fallback_reset: i64) -> Option<i64> {
+fn confirmed_fable_reset(usage: &Value, fallback_reset: i64) -> FableQuotaVerdict {
     const EXHAUSTED_PERCENT: f64 = 99.999;
-    let fields = extract_usage_fields(usage)?;
+    let Some(fields) = extract_usage_fields(usage) else {
+        return FableQuotaVerdict::Unverified;
+    };
     if fields.five_hour.utilization >= EXHAUSTED_PERCENT
         || fields.seven_day.utilization >= EXHAUSTED_PERCENT
     {
-        return None;
+        return FableQuotaVerdict::GlobalExhausted;
     }
-    let fable = fields.seven_day_fable?;
+    let Some(fable) = fields.seven_day_fable else {
+        return FableQuotaVerdict::Unverified;
+    };
     if fable.utilization < EXHAUSTED_PERCENT {
-        return None;
+        return FableQuotaVerdict::Unverified;
     }
-    Some(
+    FableQuotaVerdict::FableExhausted(
         fable
             .resets_at
             .as_deref()
@@ -70,6 +74,16 @@ fn confirmed_fable_reset(usage: &Value, fallback_reset: i64) -> Option<i64> {
             .map(|value| value.timestamp())
             .unwrap_or(fallback_reset),
     )
+}
+
+#[derive(Debug, PartialEq)]
+enum FableQuotaVerdict {
+    /// Fable's model-scoped weekly window is exhausted; global windows are fine.
+    FableExhausted(i64),
+    /// A global (5h/7d) window is exhausted; the upstream reset is trustworthy.
+    GlobalExhausted,
+    /// Usage data missing or contradictory; do not trust a long upstream reset.
+    Unverified,
 }
 
 impl ClaudeCodeState {
@@ -163,15 +177,29 @@ impl ClaudeCodeState {
     }
 
     async fn classify_fable_rate_limit(&mut self, fallback_reset: i64) -> Reason {
+        // A Fable-model 429 often carries Fable's 7-day reset. If we cannot
+        // verify the limit is Fable-scoped, blindly trusting that timestamp
+        // would bench the cookie globally for days. Cap unverified cooldowns.
+        const UNVERIFIED_COOLDOWN_SECS: i64 = 3600;
+        let capped = || {
+            let cap = chrono::Utc::now().timestamp() + UNVERIFIED_COOLDOWN_SECS;
+            Reason::TooManyRequest(fallback_reset.min(cap))
+        };
         let Ok(usage) = self.fetch_usage_metrics().await else {
-            warn!("Could not verify Fable-scoped quota; preserving global 429 cooldown");
-            return Reason::TooManyRequest(fallback_reset);
+            warn!("Could not verify Fable-scoped quota; capping global cooldown at 1h");
+            return capped();
         };
-        let Some(reset) = confirmed_fable_reset(&usage, fallback_reset) else {
-            return Reason::TooManyRequest(fallback_reset);
-        };
-        info!("Confirmed Fable-scoped quota exhaustion until {reset}");
-        Reason::FableRateLimited(reset)
+        match confirmed_fable_reset(&usage, fallback_reset) {
+            FableQuotaVerdict::FableExhausted(reset) => {
+                info!("Confirmed Fable-scoped quota exhaustion until {reset}");
+                Reason::FableRateLimited(reset)
+            }
+            FableQuotaVerdict::GlobalExhausted => Reason::TooManyRequest(fallback_reset),
+            FableQuotaVerdict::Unverified => {
+                warn!("Usage data inconclusive for Fable 429; capping global cooldown at 1h");
+                capped()
+            }
+        }
     }
 }
 
@@ -239,9 +267,23 @@ mod tests {
                 "scope": {"model": {"display_name": "Fable"}}
             }]
         });
-        assert!(confirmed_fable_reset(&usage, 1).is_some());
+        assert!(matches!(
+            confirmed_fable_reset(&usage, 1),
+            FableQuotaVerdict::FableExhausted(_)
+        ));
 
         usage["five_hour"]["utilization"] = json!(100);
-        assert_eq!(confirmed_fable_reset(&usage, 1), None);
+        assert_eq!(
+            confirmed_fable_reset(&usage, 1),
+            FableQuotaVerdict::GlobalExhausted
+        );
+
+        // Missing Fable window with healthy global windows must not be trusted.
+        usage["five_hour"]["utilization"] = json!(20);
+        usage["limits"] = json!([]);
+        assert_eq!(
+            confirmed_fable_reset(&usage, 1),
+            FableQuotaVerdict::Unverified
+        );
     }
 }

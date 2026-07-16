@@ -213,6 +213,13 @@ impl CookieActor {
             state.moka.insert(hash, cookie.clone());
             return Ok(cookie.clone());
         }
+        // A Fable request must not steal the sticky mapping from a cookie that
+        // is merely fable-cooling but still perfectly valid for regular
+        // requests, or subsequent Any-scope requests lose cache affinity.
+        let preserve_sticky = scope == CookieRequestScope::Fable
+            && hash
+                .and_then(|h| state.moka.get(&h))
+                .is_some_and(|cached| state.valid.iter().any(|c| *c == cached));
         let Some(index) = state.valid.iter().position(eligible) else {
             return if scope == CookieRequestScope::Fable && !state.valid.is_empty() {
                 Err(ClewdrError::FableQuotaExhausted)
@@ -227,7 +234,9 @@ impl CookieActor {
                 msg: "Eligible cookie disappeared during dispatch",
             })?;
         state.valid.push_back(cookie.clone());
-        if let Some(hash) = hash {
+        if let Some(hash) = hash
+            && !preserve_sticky
+        {
             state.moka.insert(hash, cookie.clone());
         }
         Ok(cookie)
@@ -235,8 +244,15 @@ impl CookieActor {
 
     /// Collects a returned cookie and processes it based on the return reason
     fn collect(state: &mut CookieActorState, mut cookie: CookieStatus, reason: Option<Reason>) {
+        // Returned cookies are pre-request snapshots; a concurrent request may
+        // have set a Fable cooldown in the meantime. Never let a stale clone
+        // clear it — keep the latest (furthest) cooldown.
+        let merge_fable_cooldown = |cookie: &mut CookieStatus, existing: Option<i64>| {
+            cookie.fable_reset_time = cookie.fable_reset_time.max(existing);
+        };
         let Some(reason) = reason else {
             if let Some(existing) = state.valid.iter_mut().find(|c| **c == cookie) {
+                merge_fable_cooldown(&mut cookie, existing.fable_reset_time);
                 *existing = cookie;
                 Self::save(state);
             } else if let Some(existing) = state.exhausted.get(&cookie) {
@@ -245,11 +261,18 @@ impl CookieActor {
                 // Keep the original cooldown so a stale clone can't un-exhaust it.
                 let mut updated = cookie;
                 updated.reset_time = existing.reset_time;
+                merge_fable_cooldown(&mut updated, existing.fable_reset_time);
                 state.exhausted.replace(updated);
                 Self::save(state);
             }
             return;
         };
+        let existing_fable_reset = state
+            .valid
+            .iter()
+            .find(|c| **c == cookie)
+            .and_then(|c| c.fable_reset_time);
+        merge_fable_cooldown(&mut cookie, existing_fable_reset);
         let mut find_remove = |cookie: &CookieStatus| {
             state.valid.retain(|c| c != cookie);
         };
@@ -266,9 +289,18 @@ impl CookieActor {
                 }
             }
             Reason::FableRateLimited(i) => {
-                cookie.fable_reset_time = Some(i);
+                // Only touch the model-scoped cooldown; never overwrite the
+                // whole entry with a stale pre-request snapshot (usage buckets,
+                // account info etc. may have advanced concurrently).
                 if let Some(existing) = state.valid.iter_mut().find(|c| **c == cookie) {
-                    *existing = cookie;
+                    existing.fable_reset_time = existing.fable_reset_time.max(Some(i));
+                    Self::save(state);
+                } else if let Some(existing) = state.exhausted.get(&cookie) {
+                    // Keep the Fable cooldown even while globally exhausted, so
+                    // it survives the global reset instead of being re-probed.
+                    let mut updated = existing.clone();
+                    updated.fable_reset_time = updated.fable_reset_time.max(Some(i));
+                    state.exhausted.replace(updated);
                     Self::save(state);
                 }
                 return;

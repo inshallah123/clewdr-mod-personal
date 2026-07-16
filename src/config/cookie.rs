@@ -171,14 +171,19 @@ impl CookieStatus {
     ///
     /// # Returns
     /// The same CookieStatus with potentially updated reset_time
-    pub fn reset(self) -> Self {
+    pub fn reset(mut self) -> Self {
+        let now = chrono::Utc::now().timestamp();
+        // The Fable cooldown (7d, model-scoped) has its own lifecycle; only
+        // clear it once it has itself expired, never alongside the global 5h.
+        if self.fable_reset_time.is_some_and(|t| t < now) {
+            self.fable_reset_time = None;
+        }
         if let Some(t) = self.reset_time
-            && t < chrono::Utc::now().timestamp()
+            && t < now
         {
             info!("Cookie reset time expired");
             return Self {
                 reset_time: None,
-                fable_reset_time: None,
                 session_usage: UsageBreakdown::default(),
                 weekly_usage: UsageBreakdown::default(),
                 weekly_sonnet_usage: UsageBreakdown::default(),
